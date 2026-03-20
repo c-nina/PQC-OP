@@ -12,3 +12,4 @@ pip3 install -r requirements.txt
 
 # 3. Otros comandos
 npm install -g @openai/codex
+npm install -g @anthropic-ai/claude-code
