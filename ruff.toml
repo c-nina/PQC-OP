@@ -1,0 +1,96 @@
+# -----------------------------
+# Ruff global configuration
+# -----------------------------
+
+line-length = 120
+target-version = "py310"
+preview = true
+
+# -----------------------------
+# Lint configuration
+# -----------------------------
+
+[lint]
+
+# Rule families enabled
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "ASYNC",  # async best practices
+    "COM",    # commas
+    "FA",     # future annotations
+    "FLY",    # flynt
+    "FURB",   # refurb
+    "ICN",    # import conventions
+    "INT",    # gettext
+    "ISC",    # implicit string concat
+    "LOG",    # logging
+    "N",      # pep8-naming
+    "PIE",    # misc improvements
+    "PLE",    # pylint errors
+    "Q",      # quotes
+    "RET",    # return improvements
+    "RSE",    # raise improvements
+    "SIM",    # simplify
+    "SLOT",   # __slots__
+    "T10",    # debugger detection
+    "TC",     # type checking
+    "TID",    # tidy imports
+    "W",      # pycodestyle warnings
+    "YTT",    # year 2020 checks
+]
+
+# Rules explicitly ignored
+ignore = [
+    # Disabled because Ruff formatter handles them
+    "COM812",
+    "COM819",
+    "D206",
+    "D300",
+    "E111",
+    "E114",
+    "E117",
+    "E501",
+    "ISC001",
+    "ISC002",
+    "Q000",
+    "Q001",
+    "Q002",
+    "Q003",
+    "W191",
+
+    # Naming exceptions (often required in scientific code)
+    "N802",  # function name lowercase
+    "N803",  # argument naming
+    "N806",  # variable in function
+]
+
+fixable = ["ALL"]
+
+# -----------------------------
+# Complexity control
+# -----------------------------
+
+[lint.mccabe]
+max-complexity = 10
+
+# -----------------------------
+# Import sorting configuration
+# -----------------------------
+
+[lint.isort]
+combine-as-imports = true
+known-first-party = ["your_package_name"]
+force-single-line = false
+
+# -----------------------------
+# Formatting (Ruff formatter)
+# -----------------------------
+
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

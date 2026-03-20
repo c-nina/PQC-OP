@@ -1,0 +1,11 @@
+*.pyc
+*.out
+.ipynb_checkpoints/
+*.swp
+*.csv
+*_untracked*
+__pycache__/
+__*__/
+.eggs/
+*.egg-info/
+Results/
