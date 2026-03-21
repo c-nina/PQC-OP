@@ -303,4 +303,3 @@ def adam_optimizer_loop(
     if profile_timing and profile_once:
         adam_optimizer_loop._profile_done = True
     return weights
-
