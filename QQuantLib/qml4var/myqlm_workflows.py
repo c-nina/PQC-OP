@@ -1,471 +1,294 @@
 """
-This module contains the different myqlm workflows mandatory for
-the different PQCs evaluations needed for a training proccess
+PennyLane-based workflows for PQC evaluation and training.
+
+Replaces the myQLM plugin-stack architecture. Each workflow function
+accepts a `circuit_fn` (PennyLane QNode returned by hardware_efficient_ansatz)
+via kwargs instead of the old `pqc`, `observable`, and `qpu_info` keys.
+
+All public functions preserve their original signatures so that existing
+notebook code requires minimal changes (only the workflow_cfg dict changes).
 """
 
 import numpy as np
 from itertools import product
-from qat.core import Batch
-from QQuantLib.qpu.select_qpu import select_qpu
-from QQuantLib.qml4var.plugins import SetParametersPlugin, pdfPluging, MyQPU
-from QQuantLib.qml4var.architectures import compute_pdf_from_pqc
+
+import torch
+
 from QQuantLib.qml4var.losses import loss_function_qdml, mse, compute_integral
 from QQuantLib.qml4var.data_utils import empirical_cdf
 
 
-def stack_execution(weights, x_sample, stack, **kwargs):
-    """
-    Given a stack, the weights, an input sample, a PQC and Observable
-    (provided into the kewyword arguments) this function this function
-    builds the corresponding QLM Batch of jobs and execute it.
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
-    Parameters
-    ----------
-    weights : np array
-        array with the weights of the PQC
-    x_sample : np array
-        input sample to provide to the PQC
-    kwargs : keyword arguments
+def _weights_to_tensor(weights, device):
+    """Convert weights (list or dict or tensor) to a float64 torch tensor."""
+    if isinstance(weights, torch.Tensor):
+        return weights
+    if isinstance(weights, dict):
+        values = list(weights.values())
+    else:
+        values = list(weights)
+    return torch.tensor(values, dtype=torch.float64, device=torch.device(device))
 
-    pqc : kwargs, QLM Program
-        qlm program with the implementation of the PQC
-    observable : kwargs, QLM Observable
-        qlm observable with the Observable definition of the PQC
-    weights_names : kwargs, list
-        list with the names of the parameters of the PQC corresponding
-        to the weights
-    features_names : kwargs, list
-        list with the names of the parameters of the PQC corresponding
-        to the input features
-    nbshots : kwargs, int
-        number of shots
-    Returns
-    -------
-    results : QLM BatchResult
-        QLM BatchResult with the results of the execution of the stack
-    """
-    # Prepare PQC
-    pqc = kwargs.get("pqc")
-    observable = kwargs.get("observable")
-    weights_names = kwargs.get("weights_names")
-    features_names = kwargs.get("features_names")
-    nbshots = kwargs.get("nbshots")
-    # Build Circuit
-    circuit = pqc.to_circ()
-    # Build Basic Job with parametric circuit
-    job = circuit.to_job(nbshots=nbshots, observable=observable)
-    # Build job for CDF
-    cdf_batch = Batch(jobs=[job])
-    cdf_batch.meta_data = {
-        "weights": weights_names,
-        "features": features_names,
-    }
-    results = stack(weights, x_sample).submit(cdf_batch)
-    return results
 
+def _trapz_torch(y_tensor, x_tensor):
+    """Trapezoidal integration on torch tensors (differentiable)."""
+    if hasattr(torch, "trapezoid"):
+        return torch.trapezoid(y_tensor, x_tensor)
+    return torch.trapz(y_tensor, x_tensor)
+
+
+# ---------------------------------------------------------------------------
+# Single-sample evaluation (no gradient tracking on weights)
+# ---------------------------------------------------------------------------
 
 def cdf_workflow(weights, x_sample, **kwargs):
     """
-    This function builds the mandatory stack for evaluating a PQC
-    (provided in the kwargs) for the given weights and x_sample.
-    Additionally, it executes the stack using the stack_execution
-    function. So it computes the corresponding CDF value for the
-    given weights and x_sample.
+    Evaluate CDF for one sample.
 
     Parameters
     ----------
-    weights : np array
-        array with the weights of the PQC
-    x_sample : np array
-        input sample to provide to the PQC
-    kwargs : keyword arguments
-        same kwargs like the provided to the stack_execution function
-    qpu_info : kwargs, dictionary
-        Python dictionary with the infor for configuring a QPU
+    weights : list, dict, or torch.Tensor
+        PQC weights.
+    x_sample : np.array, shape (n_features,) or (1, n_features)
+        Raw input feature sample.
+    kwargs : dict
+        Must contain:
+        - circuit_fn : PennyLane QNode from hardware_efficient_ansatz
+        Optional:
+        - torch_device : str (default "cpu")
 
     Returns
     -------
-    results : float
-        Value of the CDF, computed using the input PQC, for the given
-        weights and x_sample.
+    float
+        CDF value for this sample.
     """
-    # Get the QPU
-    qpu_dict = kwargs.get("qpu_info")
-    qpu = select_qpu(qpu_dict)
-    # Build the execution stack for CDF
-    stack_cdf = lambda weights_, features_: SetParametersPlugin(weights_, features_) | MyQPU(qpu)
-    # Execute the stack
-    workflow_cfg = {
-        "pqc": kwargs.get("pqc"),
-        "observable": kwargs.get("observable"),
-        "weights_names": kwargs.get("weights_names"),
-        "features_names": kwargs.get("features_names"),
-        "nbshots": kwargs.get("nbshots"),
-    }
-    results = stack_execution(weights, x_sample, stack_cdf, **workflow_cfg)
-    results = results[0].value
-    return results
+    circuit_fn = kwargs["circuit_fn"]
+    device = kwargs.get("torch_device", "cpu")
+
+    w_t = _weights_to_tensor(weights, device)
+    x_flat = np.asarray(x_sample).reshape(-1)
+    x_t = torch.tensor(x_flat, dtype=torch.float64, device=torch.device(device))
+
+    with torch.no_grad():
+        result = circuit_fn(w_t, x_t)
+    return result.item()
 
 
 def pdf_workflow(weights, x_sample, **kwargs):
     """
-    Given a PQC that computes the CDF (provided in the kwargs), this
-    function builds the mandatory stack for computing the corresponding
-    PDF for the given weights and x_sample.
-    Additionally, it executes the stack using the stack_execution
-    function. So it computes the corresponding PDF value for the
-    given weights and x_sample.
+    Evaluate PDF for one sample via autograd: PDF = d(CDF)/d(raw_feature).
 
     Parameters
     ----------
-    weights : np array
-        array with the weights of the PQC
-    x_sample : np array
-        input sample to provide to the PQC
-    kwargs : keyword arguments.
-        See cdf_workflow documentation
+    Same as cdf_workflow.
 
     Returns
     -------
-    results : float
-        Value of the PDF, computed using the input PQC, for the given
-        weights and x_sample.
+    float
+        PDF value (derivative of CDF w.r.t. raw input feature).
     """
-    # Get the QPU
-    qpu_dict = kwargs.get("qpu_info")
-    qpu = select_qpu(qpu_dict)
-    # Build the execution stack
-    features_names = kwargs.get("features_names")
-    stack_pdf = lambda weights_, features_: (
-        pdfPluging(features_names) | SetParametersPlugin(weights_, features_) | MyQPU(qpu)
+    circuit_fn = kwargs["circuit_fn"]
+    device = kwargs.get("torch_device", "cpu")
+
+    w_t = _weights_to_tensor(weights, device)
+    if isinstance(w_t, torch.Tensor) and w_t.requires_grad:
+        w_t = w_t.detach()
+
+    x_flat = np.asarray(x_sample).reshape(-1)
+    x_t = torch.tensor(
+        x_flat, dtype=torch.float64, device=torch.device(device), requires_grad=True
     )
-    # Execute the stack
-    workflow_cfg = {
-        "pqc": kwargs.get("pqc"),
-        "observable": kwargs.get("observable"),
-        "weights_names": kwargs.get("weights_names"),
-        "features_names": kwargs.get("features_names"),
-        "nbshots": kwargs.get("nbshots"),
-    }
-    results = stack_execution(weights, x_sample, stack_pdf, **workflow_cfg)
-    results = results[0].value
-    return results
+    cdf = circuit_fn(w_t, x_t)
+    cdf.backward()
+    return x_t.grad.sum().item()
 
 
-def workflow_execution_submit(weights, data_x, workflow, dask_client=None):
-    """
-    Given an input weights, a complete dataset of features, and a
-    properly configured workflow function (like cdf_workflow or
-    pdf_workflow) executes the workflow for all the samples of the
-    dataset
-
-    Parameters
-    ----------
-    weights : np array
-        array with the weights of the PQC
-    data_x : np array
-        array with the dataset of input features
-    dask_client : dask client
-        Dask client for speed up computations
-    Returns
-    -------
-    y_data : depends on dask_client. If dask_client is None then returns
-    a list with results of the workflow for all input dataset. If a
-    dask_client is passed then returns a list of futures and a gather
-    operation should be executed for retrieving the data.
-    """
-    if dask_client is None:
-        y_data = [workflow(weights, x_) for x_ in data_x]
-    else:
-        y_data = [dask_client.submit(workflow, weights, x_, pure=False) for x_ in data_x]
-    return y_data
-
+# ---------------------------------------------------------------------------
+# Dataset-level evaluation
+# ---------------------------------------------------------------------------
 
 def workflow_execution(weights, data_x, workflow, dask_client=None):
     """
-    Given an input weights, a complete dataset of features, and a
-    properly configured workflow function (like cdf_workflow or
-    pdf_workflow) executes the workflow for all the samples of the
-    dataset. Dask cluster computation using map
+    Execute a workflow function for every sample in data_x.
 
     Parameters
     ----------
-    weights : np array
-        array with the weights of the PQC
-    data_x : np array
-        array with the dataset of input features
-    dask_client : dask client
-        Dask client for speed up computations
+    weights : list/dict/tensor
+    data_x : np.array, shape (N, n_features)
+    workflow : callable, workflow(weights, x_sample) -> float
+    dask_client : optional
+
     Returns
     -------
-    y_data : list
-
-    Note
-    ----
-    The return of the function depends on dask_client.
-    If dask_client is None then returns a list with results
-    of the workflow for all input dataset. If a dask_client is passed
-    then returns a list of futures and a gather operation should
-    be executed for retrieving the data.
+    list or list of dask futures
     """
     if dask_client is None:
-        y_data = [workflow(weights, x_) for x_ in data_x]
-    else:
-        # y_data = [dask_client.submit(workflow, weights, x_, pure=False) for x_ in data_x]
-        y_data = dask_client.map(workflow, *([weights] * data_x.shape[0], data_x))
-    return y_data
+        return [workflow(weights, x_) for x_ in data_x]
+    return dask_client.map(workflow, *([weights] * data_x.shape[0], data_x))
 
 
 def workflow_for_cdf(weights, data_x, dask_client=None, **kwargs):
     """
-    Workflow for proccessing the CDF for the input data_x.
-
-    Parameters
-    ----------
-    weights : numpy array
-        Array with weights for PQC
-    data_x : numpy array
-        Array with dataset of the features
-    dask_client : Dask client
-        Dask client for speed up training. Not mandatory
-    kwargs : keyword arguments.
-        See cdf_workflow function documentation.
+    Compute CDF predictions for a dataset.
 
     Returns
     -------
-    output_dict : dict
-        dictionary with the computed arrays. Keys:
-        data_y : input data_y data
-        y_predict_cdf : CDF prediction for data_x
+    dict with key 'y_predict_cdf' : np.array shape (N,)
     """
-    workflow_cfg = {
-        "pqc": kwargs.get("pqc"),
-        "observable": kwargs.get("observable"),
-        "weights_names": kwargs.get("weights_names"),
-        "features_names": kwargs.get("features_names"),
-        "nbshots": kwargs.get("nbshots"),
-        "qpu_info": kwargs.get("qpu_info"),
-    }
-    # for computing CDF using PQC
-    cdf_workflow_ = lambda w, x: cdf_workflow(w, x, **workflow_cfg)
-    # Get CDF prediction for train data
-    cdf_train_prediction = workflow_execution(weights, data_x, cdf_workflow_, dask_client=dask_client)
-    if dask_client is None:
-        cdf_train_prediction = np.array(cdf_train_prediction)
-    else:
-        cdf_train_prediction = np.array(dask_client.gather(cdf_train_prediction))
-    output_dict = {"y_predict_cdf": cdf_train_prediction}
-    return output_dict
+    cdf_fn = lambda w, x: cdf_workflow(w, x, **kwargs)
+    preds = workflow_execution(weights, data_x, cdf_fn, dask_client=dask_client)
+    if dask_client is not None:
+        preds = dask_client.gather(preds)
+    return {"y_predict_cdf": np.array(preds)}
 
 
 def workflow_for_pdf(weights, data_x, dask_client=None, **kwargs):
     """
-    Workflow for proccessing the CDF for the input data_x.
-
-    Parameters
-    ----------
-    weights : numpy array
-        Array with weights for PQC
-    data_x : numpy array
-        Array with dataset of the features
-    dask_client : Dask client
-        Dask client for speed up training. Not mandatory
-    kwargs : keyword arguments.
-        See pdf_workflow function documentation.
+    Compute PDF predictions for a dataset.
 
     Returns
     -------
-    output_dict : dict
-        dictionary with the computed arrays. Keys:
-        y_predict_pdf : PDF prediction for data_x
+    dict with key 'y_predict_pdf' : np.array shape (N,)
     """
-    workflow_cfg = {
-        "pqc": kwargs.get("pqc"),
-        "observable": kwargs.get("observable"),
-        "weights_names": kwargs.get("weights_names"),
-        "features_names": kwargs.get("features_names"),
-        "nbshots": kwargs.get("nbshots"),
-        "qpu_info": kwargs.get("qpu_info"),
-    }
-    # for computing CDF using PQC
-    pdf_workflow_ = lambda w, x: pdf_workflow(w, x, **workflow_cfg)
-    # Get CDF prediction for train data
-    pdf_train_prediction = workflow_execution(weights, data_x, pdf_workflow_, dask_client=dask_client)
-    if dask_client is None:
-        pdf_train_prediction = np.array(pdf_train_prediction)
-    else:
-        pdf_train_prediction = np.array(dask_client.gather(pdf_train_prediction))
-    output_dict = {"y_predict_pdf": pdf_train_prediction}
-    return output_dict
+    pdf_fn = lambda w, x: pdf_workflow(w, x, **kwargs)
+    preds = workflow_execution(weights, data_x, pdf_fn, dask_client=dask_client)
+    if dask_client is not None:
+        preds = dask_client.gather(preds)
+    return {"y_predict_pdf": np.array(preds)}
 
 
-def workflow_for_qdml(weights, data_x, data_y, dask_client=None, **kwargs):
+# ---------------------------------------------------------------------------
+# Differentiable loss (used by torch_gradient)
+# ---------------------------------------------------------------------------
+
+def _qdml_loss_torch(weights_t, data_x, data_y, circuit_fn, device, loss_weights,
+                     minval, maxval, points, create_graph=False):
     """
-    Workflow for proccessing the data and obtain the mandatory arrays
-    for computing the desired loss.
+    Compute QDML loss as a torch scalar.
 
     Parameters
     ----------
-    weights : numpy array
-        Array with weights for PQC.
-    data_x : numpy array
-        Array with dataset of the features. Shape: (-1, number of features)
-    data_y : numpy array
-        Array with targets (labes) dataset. Shape: (-1, 1)
-    dask_client : Dask client
-        Dask client for speed up training. Not mandatory
-    kwargs : keyword arguments.
-        See the cdf_workflow function. The following ones can be provided
-    minval : kwargs, list
-        Minimum values for the domain of all the features.
-    maxval : kwargs, list
-        Maximum values for the domain of all the features.
-    points : kwargs,int
-        Number of points for a feature domain discretization
-
-    Returns
-    -------
-    output_dict : dict
-        dictionary with the computed arrays. Keys:
-        data_y : input data_y data
-        y_predict_cdf : CDF prediction for data_x
-        y_predict_pdf : PDF prediction for data_x
-        x_integral : domain discretization for computing integral
-        y_predict_pdf_domain : PDF of the x_integral
+    create_graph : bool
+        If True, build the second-order computation graph so that the outer
+        backward pass (d(loss)/d(weights_t)) propagates through the PDF term.
+        Set to True only when weights_t.requires_grad=True (training gradient).
+        Set to False for monitoring evaluations.
     """
+    torch_device = torch.device(device)
+    data_x_arr = np.asarray(data_x)
+    if data_x_arr.ndim == 1:
+        data_x_arr = data_x_arr.reshape(-1, 1)
 
-    workflow_cfg = {
-        "pqc": kwargs.get("pqc"),
-        "observable": kwargs.get("observable"),
-        "weights_names": kwargs.get("weights_names"),
-        "features_names": kwargs.get("features_names"),
-        "nbshots": kwargs.get("nbshots"),
-        "qpu_info": kwargs.get("qpu_info"),
-    }
-    # Setting the workflows
+    alpha_0, alpha_1 = float(loss_weights[0]), float(loss_weights[1])
 
-    # for computing CDF using PQC
-    cdf_workflow_ = lambda w, x: cdf_workflow(w, x, **workflow_cfg)
-    # for computing PDF using PQC
-    pdf_workflow_ = lambda w, x: pdf_workflow(w, x, **workflow_cfg)
-    # for computing the integral
-    pdf_workflow_square = lambda w, x: pdf_workflow(w, x, **workflow_cfg) ** 2
+    # --- CDF predictions ---
+    cdf_list = []
+    for x_i in data_x_arr:
+        x_t = torch.tensor(x_i, dtype=torch.float64, device=torch_device)
+        cdf_list.append(circuit_fn(weights_t, x_t))
+    cdf_preds = torch.stack(cdf_list).reshape(-1, 1)
 
-    # Getting the Domain for discretization
-    minval = kwargs.get("minval")
-    maxval = kwargs.get("maxval")
-    points = kwargs.get("points")
-    # Build discretization for each domain dimension
-    x_integral = np.linspace(minval, maxval, points)
-    # Complete domain discretization by Cartesian Product
-    domain_x = np.array(list(product(*[x_integral[:, i] for i in range(x_integral.shape[1])])))
-    # Get CDF prediction for train data
-    cdf_train_prediction = workflow_execution(weights, data_x, cdf_workflow_, dask_client=dask_client)
-    # Get PDF prediction for train data
-    pdf_train_prediction = workflow_execution(weights, data_x, pdf_workflow_, dask_client=dask_client)
-    # Get square PDF prediction for domain
-    pdf_square_prediction = workflow_execution(weights, domain_x, pdf_workflow_square, dask_client=dask_client)
-    # Compute the integral
-    integral = compute_integral(pdf_square_prediction, domain_x, dask_client=dask_client)
+    labels_t = torch.tensor(
+        np.asarray(data_y).reshape(-1, 1), dtype=torch.float64, device=torch_device
+    )
+    loss_cdf = torch.mean((cdf_preds - labels_t) ** 2)
 
-    if dask_client is None:
-        cdf_train_prediction = np.array(cdf_train_prediction)
-        pdf_train_prediction = np.array(pdf_train_prediction)
+    # --- PDF predictions (d(CDF)/dx, needs create_graph for outer backward) ---
+    pdf_list = []
+    for x_i in data_x_arr:
+        x_t = torch.tensor(
+            x_i, dtype=torch.float64, device=torch_device, requires_grad=True
+        )
+        cdf_i = circuit_fn(weights_t, x_t)
+        pdf_i = torch.autograd.grad(cdf_i, x_t, create_graph=create_graph)[0]
+        pdf_list.append(pdf_i.sum())
+    pdf_preds = torch.stack(pdf_list).reshape(-1, 1)
+
+    mean_pdf = torch.mean(pdf_preds)
+
+    # --- Integral of PDF² over the domain ---
+    x_integral = np.linspace(
+        np.asarray(minval).reshape(-1),
+        np.asarray(maxval).reshape(-1),
+        int(points)
+    )  # shape (points, n_features)
+    domain_x = np.array(
+        list(product(*[x_integral[:, i] for i in range(x_integral.shape[1])]))
+    )
+
+    pdf_sq_list = []
+    for x_i in domain_x:
+        x_t = torch.tensor(
+            x_i, dtype=torch.float64, device=torch_device, requires_grad=True
+        )
+        cdf_i = circuit_fn(weights_t, x_t)
+        pdf_i = torch.autograd.grad(cdf_i, x_t, create_graph=create_graph)[0]
+        pdf_sq_list.append((pdf_i.sum()) ** 2)
+
+    pdf_sq_tensor = torch.stack(pdf_sq_list)
+
+    if domain_x.shape[1] == 1:
+        x_dom_t = torch.tensor(
+            domain_x[:, 0], dtype=torch.float64, device=torch_device
+        )
+        integral = _trapz_torch(pdf_sq_tensor, x_dom_t)
     else:
-        cdf_train_prediction = np.array(dask_client.gather(cdf_train_prediction))
-        pdf_train_prediction = np.array(dask_client.gather(pdf_train_prediction))
-        integral = dask_client.gather(integral)
+        # Monte Carlo for higher dimensions
+        factor = float(
+            np.prod(domain_x.max(axis=0) - domain_x.min(axis=0)) / domain_x.shape[0]
+        )
+        integral = pdf_sq_tensor.sum() * factor
 
-    cdf_train_prediction = cdf_train_prediction.reshape((-1, 1))
-    pdf_train_prediction = pdf_train_prediction.reshape((-1, 1))
+    loss = alpha_0 * loss_cdf + alpha_1 * (-2.0 * mean_pdf + integral)
+    return loss
 
-    output_dict = {
-        "y_predict_cdf": cdf_train_prediction,
-        "y_predict_pdf": pdf_train_prediction,
-        "integral": integral,
-        "data_y": data_y,
-    }
-    return output_dict
 
+# ---------------------------------------------------------------------------
+# High-level workflow functions (same API as before)
+# ---------------------------------------------------------------------------
 
 def qdml_loss_workflow(weights, data_x, data_y, dask_client=None, **kwargs):
     """
-    Workflow for computing the qdml loss function.
+    Compute QDML loss.
+
+    When weights is a torch.Tensor with requires_grad=True (called from
+    torch_gradient), returns a differentiable scalar.
+    Otherwise, returns a plain float for monitoring.
 
     Parameters
     ----------
-    Same parameters that workflow_for_qdml
-    loss_weights : kwargs, list
-        Weights for QDML loss terms:
-        [supervised_term_weight, differential_term_weight]
-
-    Returns
-    -------
-    loss_ : computed loss function value for the input data.
-
+    weights : list, dict, or torch.Tensor
+    data_x : np.array
+    data_y : np.array
+    dask_client : ignored (kept for API compatibility)
+    kwargs : must contain circuit_fn, torch_device, loss_weights,
+             minval, maxval, points.
     """
-
-    # Optional weights for the two QDML loss terms:
-    # [supervised_term_weight, differential_term_weight]
+    circuit_fn = kwargs["circuit_fn"]
+    device = kwargs.get("torch_device", "cpu")
     loss_weights = kwargs.get("loss_weights", [1.0, 5.0])
+    minval = kwargs.get("minval")
+    maxval = kwargs.get("maxval")
+    points = kwargs.get("points")
 
-    # Get the mandatory array for computing loss
-    output_dict = workflow_for_qdml(weights, data_x, data_y, dask_client=dask_client, **kwargs)
-
-    loss_ = loss_function_qdml(
-        output_dict.get("data_y"),
-        output_dict.get("y_predict_cdf"),
-        output_dict.get("y_predict_pdf"),
-        output_dict.get("integral"),
-        loss_weights=loss_weights,
-    )
-    return loss_
-
-
-def qdml_loss_workflow_old(weights, data_x, data_y, dask_client=None, **kwargs):
-    """
-    Workflow for computing the qdml loss function.
-
-    Parameters
-    ----------
-    Same parameters that workflow_for_qdml
-
-    Returns
-    -------
-    loss_ : computed loss function value for the input data.
-
-    """
-
-    # Get the mandatory array for computing loss
-    output_dict = workflow_for_qdml(weights, data_x, data_y, dask_client=dask_client, **kwargs)
-
-    loss_ = loss_function_qdml(
-        output_dict.get("data_y"),
-        output_dict.get("y_predict_cdf"),
-        output_dict.get("y_predict_pdf"),
-        output_dict.get("x_integral"),
-        output_dict.get("y_predict_pdf_domain"),
-    )
-    return loss_
-
-
-def mse_workflow(weights, data_x, data_y, dask_client=None, **kwargs):
-    """
-    Computes the MSE function.
-
-    Parameters
-    ----------
-    Same parameters that workflow_for_qdml
-
-    Returns
-    -------
-    mse__ : computed mse function value for the input data.
-
-    """
-    # Get the mandatory array for computing MSE
-    output_dict = workflow_for_cdf(weights, data_x, dask_client=dask_client, **kwargs)
-    mse_ = mse(data_y, output_dict["y_predict_cdf"])
-    return mse_
+    if isinstance(weights, torch.Tensor):
+        # Called from torch_gradient: need create_graph=True for PDF term
+        result = _qdml_loss_torch(
+            weights, data_x, data_y, circuit_fn, device, loss_weights,
+            minval, maxval, points, create_graph=True
+        )
+        return result
+    else:
+        # Called for monitoring: create_graph=False, return plain float
+        weights_t = _weights_to_tensor(weights, device)
+        result = _qdml_loss_torch(
+            weights_t, data_x, data_y, circuit_fn, device, loss_weights,
+            minval, maxval, points, create_graph=False
+        )
+        return result.item()
 
 
 def unsupervised_qdml_loss_workflow(
@@ -475,34 +298,27 @@ def unsupervised_qdml_loss_workflow(
         empirical_shift=-0.5,
         **kwargs):
     """
-    Unsupervised QDML loss workflow.
-
-    This workflow builds labels directly from `data_x` using the empirical
-    CDF and then evaluates the same QDML loss used by `qdml_loss_workflow`.
+    Unsupervised QDML loss: labels built from empirical CDF of data_x.
 
     Parameters
     ----------
-    weights : numpy array
-        Array with PQC trainable weights.
-    data_x : numpy array
-        Input features. Shape: (-1, number of features)
-    dask_client : Dask client
-        Dask client for speed up training. Not mandatory.
+    Same as qdml_loss_workflow, minus data_y.
     empirical_shift : float
         Constant shift added to empirical CDF labels. Default -0.5.
-    kwargs : keyword arguments
-        Same arguments as `qdml_loss_workflow`.
-
-    Returns
-    -------
-    loss_ : float
-        Computed unsupervised QDML loss.
     """
     data_x = np.asarray(data_x)
     if data_x.ndim == 1:
-        data_x = data_x.reshape((-1, 1))
-    data_y = empirical_cdf(data_x).reshape((-1, 1)) + empirical_shift
-    return qdml_loss_workflow(weights, data_x, data_y, dask_client=dask_client, **kwargs)
+        data_x = data_x.reshape(-1, 1)
+    data_y = empirical_cdf(data_x).reshape(-1, 1) + empirical_shift
+    return qdml_loss_workflow(
+        weights, data_x, data_y, dask_client=dask_client, **kwargs
+    )
+
+
+def mse_workflow(weights, data_x, data_y, dask_client=None, **kwargs):
+    """MSE of CDF predictions (numpy, for metric evaluation)."""
+    out = workflow_for_cdf(weights, data_x, dask_client=dask_client, **kwargs)
+    return mse(data_y, out["y_predict_cdf"])
 
 
 def dft_from_trained_pqc(
@@ -516,35 +332,20 @@ def dft_from_trained_pqc(
     """
     Compute DFT coefficients from direct evaluations of a trained PQC.
 
-    The circuit is evaluated on an evenly spaced 1D grid in [minval, maxval)
-    and a discrete Fourier transform is applied:
-        c_k = FFT(y_predict) / N
-
     Parameters
     ----------
-    weights : numpy array
-        Array with PQC trainable weights.
-    minval : float
-        Lower bound of the evaluation interval.
-    maxval : float
-        Upper bound of the evaluation interval.
+    weights : list/dict/tensor
+    minval, maxval : float
+        Evaluation interval bounds.
     points : int
-        Number of evaluation points (N for the DFT).
+        Number of grid points.
     prediction : str
-        Type of circuit output to transform. Options: "cdf" or "pdf".
-    dask_client : Dask client
-        Dask client for speed up evaluation. Not mandatory.
-    kwargs : keyword arguments
-        Same arguments as workflow_for_cdf/workflow_for_pdf.
+        "cdf" or "pdf".
+    kwargs : must contain circuit_fn and features_names.
 
     Returns
     -------
-    output_dict : dict
-        Dictionary with:
-        x_domain : evaluation points in [minval, maxval)
-        y_predict : direct circuit evaluations on x_domain
-        k_values : integer Fourier modes sorted increasingly
-        c_k : complex Fourier coefficients sorted with k_values
+    dict with x_domain, y_predict, k_values, c_k.
     """
     if points < 2:
         raise ValueError("points must be >= 2")
@@ -552,12 +353,12 @@ def dft_from_trained_pqc(
         raise ValueError("maxval must be greater than minval")
     features_names = kwargs.get("features_names")
     if features_names is None:
-        raise ValueError("features_names should be provided in kwargs")
+        raise ValueError("features_names must be provided in kwargs")
     if len(features_names) != 1:
         raise ValueError("dft_from_trained_pqc currently supports only 1 feature")
 
     x_domain = np.linspace(minval, maxval, points, endpoint=False)
-    data_x = x_domain.reshape((-1, 1))
+    data_x = x_domain.reshape(-1, 1)
 
     if prediction == "cdf":
         y_predict = workflow_for_cdf(
@@ -568,17 +369,16 @@ def dft_from_trained_pqc(
             weights, data_x, dask_client=dask_client, **kwargs
         )["y_predict_pdf"]
     else:
-        raise ValueError("prediction should be either 'cdf' or 'pdf'")
+        raise ValueError("prediction must be 'cdf' or 'pdf'")
 
-    y_predict = np.asarray(y_predict).reshape((-1,))
+    y_predict = np.asarray(y_predict).reshape(-1)
     c_k = np.fft.fft(y_predict) / points
     k_values = np.fft.fftfreq(points, d=1.0 / points).astype(int)
     order = np.argsort(k_values)
 
-    output_dict = {
+    return {
         "x_domain": x_domain,
         "y_predict": y_predict,
         "k_values": k_values[order],
         "c_k": c_k[order],
     }
-    return output_dict

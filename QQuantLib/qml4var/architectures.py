@@ -1,134 +1,141 @@
 """
-Architectures and Architecture class definition
+Architectures and Architecture class definition (PennyLane backend)
 """
 
-import copy
 import numpy as np
-import qat.lang.AQASM as qlm
-from qat.core import Observable, Term
+import torch
+import pennylane as qml
 
 
 def hardware_efficient_ansatz(**kwargs):
     """
-    Create a hardware efficient ansatz.
+    Create a hardware efficient ansatz as a PennyLane QNode.
+
+    The circuit applies, for each layer:
+      1. RX(weight) on each qubit
+      2. RY(normalized_feature) on each qubit
+      3. CNOT entanglement chain (circular)
+
+    Feature normalization (base_frecuency * x + shift_feature) is applied
+    inside the circuit so callers pass raw feature values.
 
     Parameters
     ----------
-    kwargs : kwargs
-        Input dictionary for configuring the ansatz. Mandatory keys:
-    features_number : kwargs, int
-        Number of features
-    n_qubits_by_feature : kwargs, int
-        Number of qubits used for each feature
-    n_layers : kwargs, int
-        Number of layers of the PQC
-    base_frecuency : kwargs, float
-        Slope for feature normalization
-    shift_feature : kwargs, float
-        Shift for feature normalization
+    features_number : int
+        Number of input features.
+    n_qubits_by_feature : int
+        Number of qubits used for each feature.
+    n_layers : int
+        Number of variational layers.
+    base_frecuency : list of float
+        Slope for feature normalization (one per feature).
+    shift_feature : list of float
+        Shift for feature normalization (one per feature).
+    torch_device : str, optional
+        PyTorch device string, e.g. "cpu" or "cuda". Default: "cpu".
 
     Returns
     -------
-    pqc : QLM Program
-        QLM Program with the ansatz
-    weights_names : list
-        list with the parameters corrresponding to the weights
-    features_names : list
-        list with the parameters corrresponding to the features
+    circuit : callable
+        PennyLane QNode with signature circuit(weights, raw_features) -> scalar.
+        Both arguments must be torch.Tensor.
+    weights_names : list of str
+        Parameter names for the trainable weights.
+    features_names : list of str
+        Parameter names for the input features.
     """
     features_number = kwargs.get("features_number")
     n_qubits_by_feature = kwargs.get("n_qubits_by_feature")
     n_layers = kwargs.get("n_layers")
-    base_frecuency = kwargs.get("base_frecuency", 1.0)
-    shift_feature = kwargs.get("shift_feature", 1.0)
-    n_qubits = n_qubits_by_feature * features_number
-    # Begin the QLM program
-    pqc = qlm.Program()
-    qbits = pqc.qalloc(n_qubits)
-    features_names = ["feature_{}".format(input_) for input_ in range(features_number)]
-    features = [
-        base_frecuency[i] * pqc.new_var(float, feature) + shift_feature[i] for i, feature in enumerate(features_names)
-    ]
+    base_frecuency = kwargs.get("base_frecuency", [1.0] * features_number)
+    shift_feature = kwargs.get("shift_feature", [0.0] * features_number)
 
-    # create lists with parametric weights
+    n_qubits = n_qubits_by_feature * features_number
+
+    features_names = ["feature_{}".format(i) for i in range(features_number)]
+
     weights_names = []
-    weights = []
-    for layer_ in range(n_layers):
-        input_index = []
-        for input_ in range(features_number):
-            qubit_index = []
-            for qubit_ in range(n_qubits_by_feature):
-                weights_names.append("weights_{}_{}_{}".format(layer_, input_, qubit_))
-                qubit_index.append(pqc.new_var(float, "weights_{}_{}_{}".format(layer_, input_, qubit_)))
-            input_index.append(qubit_index)
-        weights.append(input_index)
-
-    # Creating Layers
     for layer_ in range(n_layers):
         for input_ in range(features_number):
-            # Variational Layer
             for qubit_ in range(n_qubits_by_feature):
-                # For each input reply along the number of qubits for input
-                pqc.apply(qlm.RX(weights[layer_][input_][qubit_]), qbits[input_ * n_qubits_by_feature + qubit_])
-            for qubit_ in range(n_qubits_by_feature):
-                # For each input reply the feature
-                # along the number of qubits for input
-                pqc.apply(qlm.RY(features[input_]), qbits[input_ * n_qubits_by_feature + qubit_])
+                weights_names.append(
+                    "weights_{}_{}_{}".format(layer_, input_, qubit_)
+                )
 
-        # Complete entanglement layer
-        for qubit_ in range(n_qubits - 1):
-            pqc.apply(qlm.X.ctrl(), qbits[qubit_], qbits[qubit_ + 1])
-        if n_qubits > 1:
-            pqc.apply(qlm.X.ctrl(), qbits[n_qubits - 1], qbits[0])
-    return pqc, weights_names, features_names
+    # Capture normalization constants as tensors
+    bf = torch.tensor(base_frecuency, dtype=torch.float64)
+    sf = torch.tensor(shift_feature, dtype=torch.float64)
 
+    # default.qubit + backprop is required for two reasons:
+    #   1. The PDF loss term needs create_graph=True (second-order differentiation:
+    #      d²(circuit)/(dx·dw)), which adjoint diff does NOT support.
+    #   2. qml.vmap (used for batched evaluation in the workflow) is compatible
+    #      with default.qubit + backprop but not with lightning.qubit + adjoint.
+    # GPU acceleration is achieved via torch_device="cuda" in workflow_cfg, which
+    # moves all tensor/gradient operations (Adam, loss, backprop) to CUDA.
+    # For circuits with ≤ 12 qubits, the state vector (≤ 4096 amplitudes) is
+    # negligible in cost; the real gain comes from batching + GPU tensor ops.
+    dev = qml.device("default.qubit", wires=n_qubits)
+    print(f"[hardware_efficient_ansatz] device=default.qubit  diff_method=backprop  wires={n_qubits}")
 
-def z_observable(**kwargs):
-    """
-    Create an Observable.
+    @qml.qnode(dev, diff_method="backprop", interface="torch")
+    def circuit(weights, raw_features):
+        """
+        Parameters
+        ----------
+        weights : torch.Tensor, shape (n_layers * features_number * n_qubits_by_feature,)
+        raw_features : torch.Tensor, shape (features_number,)
+        """
+        # Apply feature normalization inside the circuit (same as old QLM parametric expr)
+        norm_features = bf.to(raw_features.device) * raw_features + sf.to(raw_features.device)
 
-    Parameters
-    ----------
-    kwargs : kwargs
-        Input dictionary for configuring the ansatz
-    features_number : kwargs, int
-        Number of input features
-    n_qubits_by_feature : kwargs, int
-        Number of qubits for encoding each feature
+        for layer_ in range(n_layers):
+            for input_ in range(features_number):
+                base_w = (
+                    layer_ * features_number * n_qubits_by_feature
+                    + input_ * n_qubits_by_feature
+                )
+                for qubit_ in range(n_qubits_by_feature):
+                    actual_qubit = input_ * n_qubits_by_feature + qubit_
+                    qml.RX(weights[base_w + qubit_], wires=actual_qubit)
+                for qubit_ in range(n_qubits_by_feature):
+                    actual_qubit = input_ * n_qubits_by_feature + qubit_
+                    qml.RY(norm_features[input_], wires=actual_qubit)
 
-    Returns
-    -------
+            # Circular entanglement layer
+            for qubit_ in range(n_qubits - 1):
+                qml.CNOT(wires=[qubit_, qubit_ + 1])
+            if n_qubits > 1:
+                qml.CNOT(wires=[n_qubits - 1, 0])
 
-    observable : QLM Observable
-        QLM Observable
-    """
-    features_number = kwargs.get("features_number")
-    n_qubits_by_feature = kwargs.get("n_qubits_by_feature")
-    n_qubits = n_qubits_by_feature * features_number
-    terms = [Term(1.0, "Z" * n_qubits, list(range(n_qubits)))]
-    observable = Observable(nqbits=n_qubits, pauli_terms=terms)
-    return observable
+        # Z⊗Z⊗...⊗Z observable
+        obs = qml.PauliZ(0)
+        for q in range(1, n_qubits):
+            obs = obs @ qml.PauliZ(q)
+        return qml.expval(obs)
+
+    return circuit, weights_names, features_names
 
 
 def normalize_data(min_value, max_value, min_x=None, max_x=None):
     """
     Feature Normalization.
+
     Parameters
     ----------
     min_value : list
-        list with the minimum value for all the features
+        Minimum value for all features.
     max_value : list
-        list with the maximum value for all the features
-    min_x : list
-        minimum value for encoding the feature in a rotation
-    max_x : list
-        maximum value for encoding the feature in a rotation
+        Maximum value for all features.
+    min_x : list, optional
+        Minimum encoding value (rotation angle). Default: -pi/2.
+    max_x : list, optional
+        Maximum encoding value (rotation angle). Default: -pi/2.
+
     Returns
     -------
-    slope : np array
-        with the slope for normalization of the features
-    b0 : np array
-        with shift for normalization of the features
+    slope : np.ndarray
+    b0 : np.ndarray
     """
     max_value_ = np.array(max_value)
     min_value_ = np.array(min_value)
@@ -142,96 +149,19 @@ def normalize_data(min_value, max_value, min_x=None, max_x=None):
         max_x = np.array(max_x)
     slope = (max_x - min_x) / (max_value_ - min_value_)
     b0 = min_x - slope * min_value_
-    b1 = max_x - slope * max_value_
     return slope, b0
 
 
-def compute_pdf_from_pqc(batch, parameters):
+def init_weights(weights_names):
     """
-    Given a QLM Batch with a PQC representing a Multivariate
-    Cumulative Distribution Function (cdf) creates all the mandatory
-    PQCs for computing the corresponding Probability Distribution
-    Function, pdf. The returned is a QLM Batch with the jobs mandatory
-    for computing the pdf
+    Initialize PQC weights uniformly in [0, 1).
 
     Parameters
     ----------
-
-    batch : QLM Batch
-        QLM batch with the Jobs to execute
-    parameters : list
-        list with the name of the features for pdf computation
+    weights_names : list of str
 
     Returns
-    ------
-
-    batch_ : QLM Batch
-        QLM Batch with the jobs for pdf copmputation
+    -------
+    dict mapping weight name -> float
     """
-    batch_ = copy.deepcopy(batch)
-    if len(batch_) != 1:
-        raise ValueError("BE AWARE: Input batch MUST HAVE only 1 job")
-
-    # Select the first job
-    job = [batch_[0]]
-    for feature in parameters:
-        temp_list = []
-        for step_job in job:
-            temp_list = temp_list + step_job.differentiate(feature)
-        # Overwrite the input job list with the new job list
-        job = temp_list
-
-    # Overwrite the jobs of the output Batch
-    batch_.jobs = temp_list
-    return batch_
-
-
-def compute_gradient(batch, parameters):
-    """
-    Compile method of the plugin.
-
-    Parameters
-    ----------
-
-    batch : QLM Batch
-        QLM batch with the Jobs to execute
-    parameters : list
-        list with the name of the parameters for gradient computations
-
-    Returns
-    ------
-
-    batch_ : QLM Batch
-        QLM Batch with the jobs for computing graidents
-    """
-
-    # Deep Coopy of the input batch object
-    batch_ = copy.deepcopy(batch)
-    if len(batch_) != 1:
-        raise ValueError("BE AWARE: Input batch MUST HAVE only 1 job")
-
-    # Select the first job
-    job = batch_[0]
-    # Get the complete parameter names of the job
-    circuit_parameters = list(job.get_variables())
-    if not set(parameters).issubset(circuit_parameters):
-        raise ValueError("List of input parameters NOT contained in job parameters")
-    list_of_jobs = []
-    for parameter in parameters:
-        # For each parameter get the corresponding diferentiate jobs
-        job_ = job.differentiate(parameter)
-        for i_, step_job in enumerate(job_):
-            step_job.meta_data = {"parameter": parameter, "number": i_, "gradient_circuit": True}
-            list_of_jobs.append(step_job)
-    # list_of_jobs.append(job)
-    batch_.jobs = list_of_jobs
-    return batch_
-
-
-def init_weights(weigths_names):
-    """
-    init weights of the PQC
-    """
-
-    init_weights = {v: np.random.uniform() for v in weigths_names}
-    return init_weights
+    return {v: np.random.uniform() for v in weights_names}
