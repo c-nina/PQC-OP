@@ -7,7 +7,7 @@ import json
 import os
 import sys
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -57,9 +57,9 @@ def batch_generator(X: np.ndarray, Y: np.ndarray, batch_size: int):
 
 def new_training(**kwargs: Any):
     # Get the Base folder with the data
-    base_folder = kwargs.get("base_folder")
+    base_folder = cast(str, kwargs.get("base_folder"))
     # Get the Base nanme for the datasets
-    base_name = kwargs.get("base_name")
+    base_name = cast(str, kwargs.get("base_name"))
     data_file = base_folder + base_name
     # Load the data
     x_train, y_train, x_test, y_test = get_dataset(data_file)
@@ -74,7 +74,7 @@ def new_training(**kwargs: Any):
         [0.5 * np.pi] * data_info["features_number"],
     )
     # Get PQC parameter Configuration
-    pqc_info = kwargs.get("pqc_info")
+    pqc_info = cast(dict, kwargs.get("pqc_info"))
     pqc_info.update({
         "base_frecuency": list(base_frecuency),
         "shift_feature": list(shift_feature)
@@ -85,7 +85,7 @@ def new_training(**kwargs: Any):
     # Get the QPU info
     qpu_info = kwargs.get("qpu_info")
     # Get Optimizer INFO
-    optimizer_info = kwargs.get("optimizer_info")
+    optimizer_info = cast(dict, kwargs.get("optimizer_info"))
     # number of shots should be provided into the optimizer_info
     nbshots = optimizer_info["nbshots"]
     # number of discretization points for domain should be provided into
@@ -93,8 +93,8 @@ def new_training(**kwargs: Any):
     points = optimizer_info["points"]
     # Get Dask client if provided
     dask_client = kwargs.get("dask_client")
-    # Get Optimizer INFO
-    optimizer_info = kwargs.get("optimizer_info")
+    # Get Optimizer INFO (redefined after points extraction)
+    optimizer_info = cast(dict, kwargs.get("optimizer_info"))
     # Get Dask client if provided
     dask_client = kwargs.get("dask_client")
     # Configuration for workflows
@@ -133,7 +133,7 @@ def new_training(**kwargs: Any):
 
     # Do the stuff
     save = True
-    repetitions = kwargs.get("repetitions")
+    repetitions = cast(int, kwargs.get("repetitions"))
     for _i in range(repetitions):
         # Initial weights
         initial_weights = init_weights(weights_names)
@@ -272,7 +272,7 @@ if __name__ == "__main__":
             # Get Dask Client
             dask_client = None
             if args.json_dask is not None:
-                from distributed import Client
+                from distributed import Client  # type: ignore[import]
                 dask_client = Client(scheduler_file=args.json_dask)
             qpu_info = qpu_list[args.qpu_id]
             info = vars(args)

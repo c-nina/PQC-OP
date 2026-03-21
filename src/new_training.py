@@ -8,7 +8,7 @@ import json
 import os
 import sys
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -74,9 +74,9 @@ def new_training(**kwargs: Any):
     Execute a complete training
     """
     # Get the Base folder with the data
-    base_folder = kwargs.get("base_folder")
+    base_folder = cast(str, kwargs.get("base_folder"))
     # Get the Base nanme for the datasets
-    base_name = kwargs.get("base_name")
+    base_name = cast(str, kwargs.get("base_name"))
     data_file = base_folder + base_name
     # Load the data
     x_train, y_train, x_test, y_test = get_dataset(data_file)
@@ -92,7 +92,7 @@ def new_training(**kwargs: Any):
     )
     # The PQC for a new training only need minimum information:
     # number of features, layers and qubits by feature
-    pqc_info = kwargs.get("pqc_info")
+    pqc_info = cast(dict, kwargs.get("pqc_info"))
     # Update PQC parameter Configuration
     pqc_info.update({
         "base_frecuency": list(base_frecuency),
@@ -104,7 +104,7 @@ def new_training(**kwargs: Any):
     # Get the QPU info
     qpu_info = kwargs.get("qpu_info")
     # Get Optimizer INFO
-    optimizer_info = kwargs.get("optimizer_info")
+    optimizer_info = cast(dict, kwargs.get("optimizer_info"))
     # number of shots should be provided into the optimizer_info
     nbshots = optimizer_info["nbshots"]
     # number of discretization points for domain should be provided into
@@ -149,7 +149,8 @@ def new_training(**kwargs: Any):
 
     # Do the stuff
     save = True
-    repetitions = kwargs.get("repetitions")
+    repetitions = cast(int, kwargs.get("repetitions"))
+    weights = None
     for _i in range(repetitions):
         # Initial weights
         initial_weights = init_weights(weights_names)
@@ -158,7 +159,7 @@ def new_training(**kwargs: Any):
         columns = weights_names + ["t", "loss", "metric"]
         pdf = pd.DataFrame(columns=columns)
         # Saving staff
-        save_name = kwargs.get("save_name")
+        save_name = cast(str, kwargs.get("save_name", "evolution.csv"))
         optimizer_info, pqc_info, pdf = store_info(
             base_folder, optimizer_info, pqc_info, pdf, save_name, save)
         # Training Time
@@ -293,7 +294,7 @@ if __name__ == "__main__":
             # Get Dask Client
             dask_client = None
             if args.json_dask is not None:
-                from distributed import Client
+                from distributed import Client  # type: ignore[import]
                 dask_client = Client(scheduler_file=args.json_dask)
             qpu_info = qpu_list[args.qpu_id]
             info = vars(args)

@@ -148,6 +148,28 @@ def normalize_data(min_value: list, max_value: list, min_x: Optional[list] = Non
     return slope, b0
 
 
+def z_observable(**kwargs: Any) -> qml.operation.Operator:
+    """
+    Return the Z⊗Z⊗...⊗Z observable for the given architecture.
+
+    Parameters
+    ----------
+    features_number : int
+    n_qubits_by_feature : int
+
+    Returns
+    -------
+    qml.operation.Operator
+    """
+    features_number = kwargs.get("features_number", 1)
+    n_qubits_by_feature = kwargs.get("n_qubits_by_feature", 1)
+    n_qubits = features_number * n_qubits_by_feature
+    obs = qml.PauliZ(0)
+    for q in range(1, n_qubits):
+        obs = obs @ qml.PauliZ(q)
+    return obs
+
+
 def init_weights(weights_names: List[str]):
     """
     Initialize PQC weights uniformly in [0, 1).

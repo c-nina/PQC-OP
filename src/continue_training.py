@@ -3,7 +3,7 @@ Functions for continue a training
 """
 import json
 import sys
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -25,9 +25,9 @@ def continue_training(**kwargs: Any):
     Continue a previously started training
     """
     # Get the Base folder with the data
-    base_folder = kwargs.get("base_folder")
+    base_folder = cast(str, kwargs.get("base_folder"))
     # Get the Base nanme for the datasets
-    base_name = kwargs.get("base_name")
+    base_name = cast(str, kwargs.get("base_name"))
     data_file = base_folder + base_name
     # Load the data
     x_train, y_train, x_test, y_test = get_dataset(data_file)
@@ -42,7 +42,7 @@ def continue_training(**kwargs: Any):
     #     [0.5*np.pi] * data_info["features_number"],
     # )
     # Get Architecture Parameters
-    train_folder = base_folder + kwargs.get("train_folder")
+    train_folder = base_folder + cast(str, kwargs.get("train_folder"))
     with open(train_folder + "pqc_dict.json") as json_file:
         pqc_info = json.load(json_file)
     # Re create Architecture
@@ -215,9 +215,9 @@ if __name__ == "__main__":
             # Get Dask Client
             dask_client = None
             if args.json_dask is not None:
-                from distributed import Client
+                from distributed import Client  # type: ignore[import]
                 dask_client = Client(scheduler_file=args.json_dask)
-                import dask
+                import dask  # type: ignore[import]
                 dask.config.set({
                     "distributed.scheduler.worker-ttl": "10min"
                 })
