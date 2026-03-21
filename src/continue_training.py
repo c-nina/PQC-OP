@@ -1,14 +1,13 @@
 """
 Functions for continue a training
 """
+
 import json
-import sys
 from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 
-sys.path.append("../../")
 from qml4var.adam import adam_optimizer_loop
 from qml4var.architectures import hardware_efficient_ansatz, z_observable
 from qml4var.data_utils import get_dataset
@@ -17,7 +16,7 @@ from qml4var.workflows import mse_workflow, qdml_loss_workflow
 
 
 def batch_generator(X: np.ndarray, Y: np.ndarray, batch_size: int):
-    return [(X[i:i + batch_size], Y[i:i + batch_size]) for i in range(0, len(X), batch_size)]
+    return [(X[i : i + batch_size], Y[i : i + batch_size]) for i in range(0, len(X), batch_size)]
 
 
 def continue_training(**kwargs: Any):
@@ -67,24 +66,28 @@ def continue_training(**kwargs: Any):
         "minval": [data_info["minval"]] * data_info["features_number"],
         "maxval": [data_info["maxval"]] * data_info["features_number"],
         "points": points,
-        "qpu_info": qpu_info
+        "qpu_info": qpu_info,
     }
     # Configure the loss function for gradiente computation
 
     def qdml_loss_workflow_(w_, x_, y_):
         return qdml_loss_workflow(w_, x_, y_, dask_client=dask_client, **workflow_cfg)
+
     # Configure the numeric gradient function
 
     def numeric_gradient_(w_, x_, y_):
         return numeric_gradient(w_, x_, y_, qdml_loss_workflow_)
+
     # Configure the loss function for evaluation
 
     def training_loss(w_):
         return qdml_loss_workflow(w_, x_train, y_train, dask_client=dask_client, **workflow_cfg)
+
     # Configure the MSE for evaluation in testing data
 
     def testing_metric(w_):
         return mse_workflow(w_, x_test, y_test, dask_client=dask_client, **workflow_cfg)
+
     # Set the Batch size and th eBatch generator
     batch_size = kwargs.get("batch_size")
     if batch_size is None:
@@ -109,12 +112,13 @@ def continue_training(**kwargs: Any):
         gradient_function=numeric_gradient_,
         batch_generator=batch_generator_,
         initial_time=initial_time,
-        **optimizer_info
+        **optimizer_info,
     )
 
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-base_folder",
@@ -165,13 +169,7 @@ if __name__ == "__main__":
         help="Identify which qpu to use",
         default=None,
     )
-    parser.add_argument(
-        "--print",
-        dest="print",
-        default=False,
-        action="store_true",
-        help="For printing "
-    )
+    parser.add_argument("--print", dest="print", default=False, action="store_true", help="For printing ")
     parser.add_argument(
         "--exe",
         dest="execution",
@@ -208,11 +206,11 @@ if __name__ == "__main__":
             dask_client = None
             if args.json_dask is not None:
                 from distributed import Client  # type: ignore[import]
+
                 dask_client = Client(scheduler_file=args.json_dask)
                 import dask  # type: ignore[import]
-                dask.config.set({
-                    "distributed.scheduler.worker-ttl": "10min"
-                })
+
+                dask.config.set({"distributed.scheduler.worker-ttl": "10min"})
             qpu_info = qpu_list[args.qpu_id]
             info = vars(args)
             info.update({"qpu_info": qpu_info})

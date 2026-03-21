@@ -3,14 +3,12 @@ Functions for creating DataSets
 """
 
 import json
-import sys
 from itertools import product
 from typing import Any
 
 import numpy as np
 from scipy.stats import multivariate_normal, norm
 
-sys.path.append("../../")
 from qml4var.data_utils import bs_cdf, bs_samples, empirical_cdf, saving_datasets
 
 

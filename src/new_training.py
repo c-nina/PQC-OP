@@ -6,15 +6,12 @@ This training needs the computation of the CDF and the corresponding PDF
 
 import json
 import os
-import sys
+import pathlib
 import uuid
 from typing import Any, cast
 
 import numpy as np
 import pandas as pd
-
-sys.path.append("../../")
-import pathlib
 
 from qml4var.adam import adam_optimizer_loop
 from qml4var.architectures import hardware_efficient_ansatz, init_weights, normalize_data, z_observable
@@ -24,9 +21,14 @@ from qml4var.workflows import mse_workflow, qdml_loss_workflow
 
 
 def store_info(
-        base_folder: str, optimizer_dict: dict, pqc_dict: dict, pdf: pd.DataFrame,
-        save_name: str = "evolution.csv", save: bool = False):
-    """"
+    base_folder: str,
+    optimizer_dict: dict,
+    pqc_dict: dict,
+    pdf: pd.DataFrame,
+    save_name: str = "evolution.csv",
+    save: bool = False,
+):
+    """ "
     Function for saving Initial Info
     Parameters
     ----------
@@ -66,7 +68,7 @@ def store_info(
 
 
 def batch_generator(X: np.ndarray, Y: np.ndarray, batch_size: int):
-    return [(X[i:i + batch_size], Y[i:i + batch_size]) for i in range(0, len(X), batch_size)]
+    return [(X[i : i + batch_size], Y[i : i + batch_size]) for i in range(0, len(X), batch_size)]
 
 
 def new_training(**kwargs: Any):
@@ -94,10 +96,7 @@ def new_training(**kwargs: Any):
     # number of features, layers and qubits by feature
     pqc_info = cast("dict", kwargs.get("pqc_info"))
     # Update PQC parameter Configuration
-    pqc_info.update({
-        "base_frecuency": list(base_frecuency),
-        "shift_feature": list(shift_feature)
-    })
+    pqc_info.update({"base_frecuency": list(base_frecuency), "shift_feature": list(shift_feature)})
     # Create PQC and Observable
     pqc, weights_names, features_names = hardware_efficient_ansatz(**pqc_info)
     observable = z_observable(**pqc_info)
@@ -122,24 +121,28 @@ def new_training(**kwargs: Any):
         "minval": [data_info["minval"]] * data_info["features_number"],
         "maxval": [data_info["maxval"]] * data_info["features_number"],
         "points": points,
-        "qpu_info": qpu_info
+        "qpu_info": qpu_info,
     }
     # Configure the loss function for gradiente computation
 
     def qdml_loss_workflow_(w_, x_, y_):
         return qdml_loss_workflow(w_, x_, y_, dask_client=dask_client, **workflow_cfg)
+
     # Configure the numeric gradient function
 
     def numeric_gradient_(w_, x_, y_):
         return numeric_gradient(w_, x_, y_, qdml_loss_workflow_)
+
     # Configure the loss function for evaluation
 
     def training_loss(w_):
         return qdml_loss_workflow(w_, x_train, y_train, dask_client=dask_client, **workflow_cfg)
+
     # Configure the MSE for evaluation in testing data
 
     def testing_metric(w_):
         return mse_workflow(w_, x_test, y_test, dask_client=dask_client, **workflow_cfg)
+
     # Set the Batch size and th eBatch generator
     batch_size = kwargs.get("batch_size")
     if batch_size is None:
@@ -160,8 +163,7 @@ def new_training(**kwargs: Any):
         pdf = pd.DataFrame(columns=columns)
         # Saving staff
         save_name = cast("str", kwargs.get("save_name", "evolution.csv"))
-        optimizer_info, pqc_info, pdf = store_info(
-            base_folder, optimizer_info, pqc_info, pdf, save_name, save)
+        optimizer_info, pqc_info, pdf = store_info(base_folder, optimizer_info, pqc_info, pdf, save_name, save)
         # Training Time
         weights = adam_optimizer_loop(
             weights_dict=initial_weights,
@@ -170,7 +172,7 @@ def new_training(**kwargs: Any):
             gradient_function=numeric_gradient_,
             batch_generator=batch_generator_,
             initial_time=0,
-            **optimizer_info
+            **optimizer_info,
         )
         print(weights)
     return weights
@@ -178,6 +180,7 @@ def new_training(**kwargs: Any):
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-base_folder",
@@ -249,13 +252,7 @@ if __name__ == "__main__":
         help="Batch Size",
         default=None,
     )
-    parser.add_argument(
-        "--print",
-        dest="print",
-        default=False,
-        action="store_true",
-        help="For printing "
-    )
+    parser.add_argument("--print", dest="print", default=False, action="store_true", help="For printing ")
     parser.add_argument(
         "--exe",
         dest="execution",
@@ -294,6 +291,7 @@ if __name__ == "__main__":
             dask_client = None
             if args.json_dask is not None:
                 from distributed import Client  # type: ignore[import]
+
                 dask_client = Client(scheduler_file=args.json_dask)
             qpu_info = qpu_list[args.qpu_id]
             info = vars(args)
