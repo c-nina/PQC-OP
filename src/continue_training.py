@@ -25,9 +25,9 @@ def continue_training(**kwargs: Any):
     Continue a previously started training
     """
     # Get the Base folder with the data
-    base_folder = cast(str, kwargs.get("base_folder"))
+    base_folder = cast("str", kwargs.get("base_folder"))
     # Get the Base nanme for the datasets
-    base_name = cast(str, kwargs.get("base_name"))
+    base_name = cast("str", kwargs.get("base_name"))
     data_file = base_folder + base_name
     # Load the data
     x_train, y_train, x_test, y_test = get_dataset(data_file)
@@ -35,7 +35,7 @@ def continue_training(**kwargs: Any):
     with open(base_folder + "data.json") as json_file:
         data_info = json.load(json_file)
     # Get Architecture Parameters
-    train_folder = base_folder + cast(str, kwargs.get("train_folder"))
+    train_folder = base_folder + cast("str", kwargs.get("train_folder"))
     with open(train_folder + "pqc_dict.json") as json_file:
         pqc_info = json.load(json_file)
     # Re create Architecture

@@ -74,9 +74,9 @@ def new_training(**kwargs: Any):
     Execute a complete training
     """
     # Get the Base folder with the data
-    base_folder = cast(str, kwargs.get("base_folder"))
+    base_folder = cast("str", kwargs.get("base_folder"))
     # Get the Base nanme for the datasets
-    base_name = cast(str, kwargs.get("base_name"))
+    base_name = cast("str", kwargs.get("base_name"))
     data_file = base_folder + base_name
     # Load the data
     x_train, y_train, x_test, y_test = get_dataset(data_file)
@@ -92,7 +92,7 @@ def new_training(**kwargs: Any):
     )
     # The PQC for a new training only need minimum information:
     # number of features, layers and qubits by feature
-    pqc_info = cast(dict, kwargs.get("pqc_info"))
+    pqc_info = cast("dict", kwargs.get("pqc_info"))
     # Update PQC parameter Configuration
     pqc_info.update({
         "base_frecuency": list(base_frecuency),
@@ -104,7 +104,7 @@ def new_training(**kwargs: Any):
     # Get the QPU info
     qpu_info = kwargs.get("qpu_info")
     # Get Optimizer INFO
-    optimizer_info = cast(dict, kwargs.get("optimizer_info"))
+    optimizer_info = cast("dict", kwargs.get("optimizer_info"))
     # number of shots should be provided into the optimizer_info
     nbshots = optimizer_info["nbshots"]
     # number of discretization points for domain should be provided into
@@ -149,7 +149,7 @@ def new_training(**kwargs: Any):
 
     # Do the stuff
     save = True
-    repetitions = cast(int, kwargs.get("repetitions"))
+    repetitions = cast("int", kwargs.get("repetitions"))
     weights = None
     for _i in range(repetitions):
         # Initial weights
@@ -159,7 +159,7 @@ def new_training(**kwargs: Any):
         columns = weights_names + ["t", "loss", "metric"]
         pdf = pd.DataFrame(columns=columns)
         # Saving staff
-        save_name = cast(str, kwargs.get("save_name", "evolution.csv"))
+        save_name = cast("str", kwargs.get("save_name", "evolution.csv"))
         optimizer_info, pqc_info, pdf = store_info(
             base_folder, optimizer_info, pqc_info, pdf, save_name, save)
         # Training Time
