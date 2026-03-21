@@ -9,7 +9,7 @@ from scipy.stats import norm, multivariate_normal
 from itertools import product
 
 sys.path.append("../../")
-from QQuantLib.qml4var.data_utils import empirical_cdf, bs_cdf, bs_samples, saving_datasets
+from qml4var.data_utils import empirical_cdf, bs_cdf, bs_samples, saving_datasets
 
 
 def create_random_data(**kwargs):

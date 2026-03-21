@@ -14,8 +14,8 @@ from itertools import product
 
 import torch
 
-from QQuantLib.qml4var.losses import loss_function_qdml, mse, compute_integral
-from QQuantLib.qml4var.data_utils import empirical_cdf
+from qml4var.losses import loss_function_qdml, mse, compute_integral
+from qml4var.data_utils import empirical_cdf
 
 
 # ---------------------------------------------------------------------------

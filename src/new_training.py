@@ -12,12 +12,12 @@ import numpy as np
 import pandas as pd
 
 sys.path.append("../../")
-from QQuantLib.qml4var.data_utils import get_dataset
-from QQuantLib.qml4var.architectures import hardware_efficient_ansatz, \
+from qml4var.data_utils import get_dataset
+from qml4var.architectures import hardware_efficient_ansatz, \
      z_observable, normalize_data, init_weights
-from QQuantLib.qml4var.myqlm_workflows import qdml_loss_workflow, mse_workflow
-from QQuantLib.qml4var.losses import numeric_gradient
-from QQuantLib.qml4var.adam import adam_optimizer_loop
+from qml4var.workflows import qdml_loss_workflow, mse_workflow
+from qml4var.losses import numeric_gradient
+from qml4var.adam import adam_optimizer_loop
 
 def store_info(
         base_folder, optimizer_dict, pqc_dict, pdf,
@@ -171,7 +171,7 @@ def new_training(**kwargs):
 
 if __name__ == "__main__":
     import argparse
-    from QQuantLib.utils.benchmark_utils import combination_for_list
+    # combination_for_list removed (benchmark_utils deleted)
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-base_folder",
