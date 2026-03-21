@@ -4,12 +4,13 @@ Functions for creating DataSets
 
 import json
 import sys
-import numpy as np
-from scipy.stats import norm, multivariate_normal
 from itertools import product
 
+import numpy as np
+from scipy.stats import multivariate_normal, norm
+
 sys.path.append("../../")
-from qml4var.data_utils import empirical_cdf, bs_cdf, bs_samples, saving_datasets
+from qml4var.data_utils import bs_cdf, bs_samples, empirical_cdf, saving_datasets
 
 
 def create_random_data(**kwargs):
@@ -41,10 +42,10 @@ def create_random_data(**kwargs):
         shape = (n_points_test, 1)
     """
 
-    n_points_train = kwargs.get("n_points_train", None)
-    n_points_test = kwargs.get("n_points_test", None)
-    minval = kwargs.get("minval", None)
-    maxval = kwargs.get("maxval", None)
+    n_points_train = kwargs.get("n_points_train")
+    n_points_test = kwargs.get("n_points_test")
+    minval = kwargs.get("minval")
+    maxval = kwargs.get("maxval")
     # Create Features
     feature_number = kwargs.get("features_number", 1)
     train_x = np.random.normal(size=(n_points_train, feature_number))
@@ -108,16 +109,16 @@ def create_bs_data(**kwargs):
         Array with the testing dataset labels
         shape = (n_points_test, 1)
     """
-    n_points_train = kwargs.get("n_points_train", None)
-    n_points_test = kwargs.get("n_points_test", None)
-    minval = kwargs.get("minval", None)
-    maxval = kwargs.get("maxval", None)
+    n_points_train = kwargs.get("n_points_train")
+    n_points_test = kwargs.get("n_points_test")
+    minval = kwargs.get("minval")
+    maxval = kwargs.get("maxval")
     # Create Features
     feature_number = kwargs.get("features_number", 1)
     # Build minval and maxval for properly dimension array generation
-    if type(minval) != float:
+    if not isinstance(minval, float):
         raise ValueError("minval SHOULD BE a float")
-    if type(maxval) != float:
+    if not isinstance(maxval, float):
         raise ValueError("maxval SHOULD BE a float")
     train_x = bs_samples(n_points_train, **kwargs)
     train_x = train_x.reshape((-1, 1))

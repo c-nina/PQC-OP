@@ -4,20 +4,23 @@ and time consuming financial CDF.
 This training needs the computation of the CDF and the corresponding PDF
 """
 
-import sys
-import os
-import uuid
 import json
+import os
+import sys
+import uuid
+
 import numpy as np
 import pandas as pd
 
 sys.path.append("../../")
-from qml4var.data_utils import get_dataset
-from qml4var.architectures import hardware_efficient_ansatz, \
-     z_observable, normalize_data, init_weights
-from qml4var.workflows import qdml_loss_workflow, mse_workflow
-from qml4var.losses import numeric_gradient
+import pathlib
+
 from qml4var.adam import adam_optimizer_loop
+from qml4var.architectures import hardware_efficient_ansatz, init_weights, normalize_data, z_observable
+from qml4var.data_utils import get_dataset
+from qml4var.losses import numeric_gradient
+from qml4var.workflows import mse_workflow, qdml_loss_workflow
+
 
 def store_info(
         base_folder, optimizer_dict, pqc_dict, pdf,
@@ -45,7 +48,7 @@ def store_info(
     print(pqc_dict)
     if save:
         # Create unique folder name for storing results
-        unique_directory = base_folder + str(uuid.uuid4())+"/"
+        unique_directory = base_folder + str(uuid.uuid4()) + "/"
         print(unique_directory)
         if not os.path.exists(unique_directory):
             os.makedirs(unique_directory)
@@ -55,15 +58,14 @@ def store_info(
         optimizer_dict.update({"file_to_save": file_to_save})
 
         # Saving Optimizer info
-        with open(unique_directory + "optimizer_dict.json", "w")  as outfile:
-            outfile.write(json.dumps(optimizer_dict))
+        pathlib.Path(unique_directory + "optimizer_dict.json").write_text(json.dumps(optimizer_dict))
         # Saving PQC info
-        with open(unique_directory + "pqc_dict.json", "w")  as outfile:
-            outfile.write(json.dumps(pqc_dict))
+        pathlib.Path(unique_directory + "pqc_dict.json").write_text(json.dumps(pqc_dict))
     return optimizer_dict, pqc_dict, pdf
 
+
 def batch_generator(X, Y, batch_size):
-    return [(X[i:i+batch_size] , Y[i:i+batch_size]) for i in range(0, len(X), batch_size)]
+    return [(X[i:i + batch_size], Y[i:i + batch_size]) for i in range(0, len(X), batch_size)]
 
 
 def new_training(**kwargs):
@@ -71,9 +73,9 @@ def new_training(**kwargs):
     Execute a complete training
     """
     # Get the Base folder with the data
-    base_folder = kwargs.get("base_folder", None)
+    base_folder = kwargs.get("base_folder")
     # Get the Base nanme for the datasets
-    base_name = kwargs.get("base_name", None)
+    base_name = kwargs.get("base_name")
     data_file = base_folder + base_name
     # Load the data
     x_train, y_train, x_test, y_test = get_dataset(data_file)
@@ -84,66 +86,70 @@ def new_training(**kwargs):
     base_frecuency, shift_feature = normalize_data(
         [data_info["minval"]] * data_info["features_number"],
         [data_info["maxval"]] * data_info["features_number"],
-        [-0.5*np.pi] * data_info["features_number"],
-        [0.5*np.pi] * data_info["features_number"],
+        [-0.5 * np.pi] * data_info["features_number"],
+        [0.5 * np.pi] * data_info["features_number"],
     )
     # The PQC for a new training only need minimum information:
     # number of features, layers and qubits by feature
-    pqc_info = kwargs.get("pqc_info", None)
+    pqc_info = kwargs.get("pqc_info")
     # Update PQC parameter Configuration
     pqc_info.update({
-        "base_frecuency" : list(base_frecuency),
-        "shift_feature" : list(shift_feature)
+        "base_frecuency": list(base_frecuency),
+        "shift_feature": list(shift_feature)
     })
     # Create PQC and Observable
     pqc, weights_names, features_names = hardware_efficient_ansatz(**pqc_info)
     observable = z_observable(**pqc_info)
     # Get the QPU info
-    qpu_info = kwargs.get("qpu_info", None)
+    qpu_info = kwargs.get("qpu_info")
     # Get Optimizer INFO
-    optimizer_info = kwargs.get("optimizer_info", None)
+    optimizer_info = kwargs.get("optimizer_info")
     # number of shots should be provided into the optimizer_info
     nbshots = optimizer_info["nbshots"]
     # number of discretization points for domain should be provided into
     # the optimizer_info
     points = optimizer_info["points"]
     # Get Dask client if provided
-    dask_client = kwargs.get("dask_client", None)
+    dask_client = kwargs.get("dask_client")
     # Configuration for workflows
     workflow_cfg = {
-        "pqc" : pqc,
-        "observable" : observable,
-        "weights_names" : weights_names,
-        "features_names" : features_names,
-        "nbshots" : nbshots,
-        "minval" : [data_info["minval"]] * data_info["features_number"],
-        "maxval" : [data_info["maxval"]] * data_info["features_number"],
-        "points" : points,
-        "qpu_info" : qpu_info
+        "pqc": pqc,
+        "observable": observable,
+        "weights_names": weights_names,
+        "features_names": features_names,
+        "nbshots": nbshots,
+        "minval": [data_info["minval"]] * data_info["features_number"],
+        "maxval": [data_info["maxval"]] * data_info["features_number"],
+        "points": points,
+        "qpu_info": qpu_info
     }
     # Configure the loss function for gradiente computation
-    qdml_loss_workflow_ = lambda w_, x_, y_: qdml_loss_workflow(
-        w_, x_, y_, dask_client=dask_client, **workflow_cfg)
+
+    def qdml_loss_workflow_(w_, x_, y_):
+        return qdml_loss_workflow(w_, x_, y_, dask_client=dask_client, **workflow_cfg)
     # Configure the numeric gradient function
-    numeric_gradient_ = lambda w_, x_, y_: numeric_gradient(
-        w_, x_, y_, qdml_loss_workflow_)
+
+    def numeric_gradient_(w_, x_, y_):
+        return numeric_gradient(w_, x_, y_, qdml_loss_workflow_)
     # Configure the loss function for evaluation
-    training_loss = lambda w_: qdml_loss_workflow(
-        w_, x_train, y_train, dask_client=dask_client, **workflow_cfg)
+
+    def training_loss(w_):
+        return qdml_loss_workflow(w_, x_train, y_train, dask_client=dask_client, **workflow_cfg)
     # Configure the MSE for evaluation in testing data
-    testing_metric = lambda w_: mse_workflow(
-        w_, x_test, y_test, dask_client=dask_client, **workflow_cfg)
+
+    def testing_metric(w_):
+        return mse_workflow(w_, x_test, y_test, dask_client=dask_client, **workflow_cfg)
     # Set the Batch size and th eBatch generator
-    batch_size = kwargs.get("batch_size", None)
+    batch_size = kwargs.get("batch_size")
     if batch_size is None:
         batch_size = len(x_train)
     batch_generator_ = batch_generator(x_train, y_train, batch_size)
-    optimizer_info.update({"batch_size":batch_size})
+    optimizer_info.update({"batch_size": batch_size})
 
     # Do the stuff
     save = True
-    repetitions = kwargs.get("repetitions", None)
-    for i in range(repetitions):
+    repetitions = kwargs.get("repetitions")
+    for _i in range(repetitions):
         # Initial weights
         initial_weights = init_weights(weights_names)
         optimizer_info.update({"file_to_save": None})
@@ -151,7 +157,7 @@ def new_training(**kwargs):
         columns = weights_names + ["t", "loss", "metric"]
         pdf = pd.DataFrame(columns=columns)
         # Saving staff
-        save_name = kwargs.get("save_name", None)
+        save_name = kwargs.get("save_name")
         optimizer_info, pqc_info, pdf = store_info(
             base_folder, optimizer_info, pqc_info, pdf, save_name, save)
         # Training Time
@@ -166,7 +172,6 @@ def new_training(**kwargs):
         )
         print(weights)
     return weights
-
 
 
 if __name__ == "__main__":
@@ -262,7 +267,7 @@ if __name__ == "__main__":
     # Defining QPU
     with open(args.json_qpu) as json_file:
         qpu_dict = json.load(json_file)
-    qpu_list = combination_for_list(qpu_dict)
+    qpu_list = list(qpu_dict.values())
     # Getting PQC Parameters
     with open(args.json_pqc) as json_file:
         pqc_dict = json.load(json_file)

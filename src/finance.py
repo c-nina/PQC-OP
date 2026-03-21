@@ -3,18 +3,15 @@
 import numpy as np
 import torch
 
-
 # ---------------------------------------------------------------------------
 # Internal helper
 # ---------------------------------------------------------------------------
 
+
 def _weights_to_tensor(weights, device):
     if isinstance(weights, torch.Tensor):
         return weights
-    if isinstance(weights, dict):
-        values = list(weights.values())
-    else:
-        values = list(weights)
+    values = list(weights.values()) if isinstance(weights, dict) else list(weights)
     return torch.tensor(values, dtype=torch.float64, device=torch.device(device))
 
 
@@ -134,8 +131,11 @@ def workflow_for_pdf_and_derivative_cris(
     -------
     dict with predict_pdf, predict_pdf_derivative, and optionally labels.
     """
-    pdf_fn = lambda w, x: pdf_workflow_cris(w, x, **kwargs)
-    pdf_deriv_fn = lambda w, x: pdf_derivative_workflow_cris(w, x, **kwargs)
+    def pdf_fn(w, x):
+        return pdf_workflow_cris(w, x, **kwargs)
+
+    def pdf_deriv_fn(w, x):
+        return pdf_derivative_workflow_cris(w, x, **kwargs)
 
     predict_pdf = workflow_execution_cris(
         weights, data_x, pdf_fn, dask_client=dask_client
@@ -259,7 +259,7 @@ def ak_bk_from_complex_coefficients(k_values, c_k, k_max=None):
     if k_values.size == 0:
         raise ValueError("k_values can not be empty")
 
-    coeff_map = {int(k): c for k, c in zip(k_values, c_k)}
+    coeff_map = {int(k): c for k, c in zip(k_values, c_k, strict=False)}
     k_available = int(np.max(np.abs(k_values)))
     k_max = k_available if k_max is None else int(k_max)
     if k_max < 0:

@@ -2,26 +2,31 @@
 Tests for the qml4var module.
 Run with: pytest tests/test_qml4var.py -v
 """
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import numpy as np
-import torch
 import pytest
+import torch
 
 from qml4var.architectures import hardware_efficient_ansatz, init_weights, normalize_data
+from qml4var.data_utils import bs_cdf, empirical_cdf
+from qml4var.losses import mse, torch_gradient
 from qml4var.workflows import (
-    cdf_workflow, pdf_workflow, workflow_for_cdf,
-    qdml_loss_workflow, unsupervised_qdml_loss_workflow, dft_from_trained_pqc,
+    cdf_workflow,
+    dft_from_trained_pqc,
+    pdf_workflow,
+    qdml_loss_workflow,
+    unsupervised_qdml_loss_workflow,
+    workflow_for_cdf,
 )
-from qml4var.losses import torch_gradient, mse
-from qml4var.data_utils import empirical_cdf, bs_cdf, bs_samples
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def small_circuit():
@@ -119,7 +124,8 @@ def test_torch_gradient_shape(small_circuit, workflow_cfg):
     data_x = np.linspace(-0.5, 0.5, 4).reshape(-1, 1)
     data_y = np.random.uniform(0, 1, (4, 1))
 
-    loss_fn = lambda w, x, y: qdml_loss_workflow(w, x, y, **workflow_cfg)
+    def loss_fn(w, x, y):
+        return qdml_loss_workflow(w, x, y, **workflow_cfg)
     grad = torch_gradient(list(weights.values()), data_x, data_y, loss_fn)
 
     assert len(grad) == len(weights_names)
@@ -132,7 +138,8 @@ def test_torch_gradient_nonzero(small_circuit, workflow_cfg):
     data_x = np.linspace(-0.5, 0.5, 4).reshape(-1, 1)
     data_y = np.random.uniform(0, 1, (4, 1))
 
-    loss_fn = lambda w, x, y: qdml_loss_workflow(w, x, y, **workflow_cfg)
+    def loss_fn(w, x, y):
+        return qdml_loss_workflow(w, x, y, **workflow_cfg)
     grad = torch_gradient(list(weights.values()), data_x, data_y, loss_fn)
     assert any(abs(g) > 1e-12 for g in grad)
 

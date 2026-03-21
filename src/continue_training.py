@@ -1,31 +1,31 @@
 """
 Functions for continue a training
 """
-import sys
-import os
 import json
-import numpy as np
+import sys
+
 import pandas as pd
 
 sys.path.append("../../")
-from qml4var.data_utils import get_dataset
-from qml4var.architectures import hardware_efficient_ansatz, \
-     z_observable, normalize_data, init_weights
-from qml4var.workflows import qdml_loss_workflow, mse_workflow
-from qml4var.losses import numeric_gradient
 from qml4var.adam import adam_optimizer_loop
+from qml4var.architectures import hardware_efficient_ansatz, z_observable
+from qml4var.data_utils import get_dataset
+from qml4var.losses import numeric_gradient
+from qml4var.workflows import mse_workflow, qdml_loss_workflow
+
 
 def batch_generator(X, Y, batch_size):
-    return [(X[i:i+batch_size] , Y[i:i+batch_size]) for i in range(0, len(X), batch_size)]
+    return [(X[i:i + batch_size], Y[i:i + batch_size]) for i in range(0, len(X), batch_size)]
+
 
 def continue_training(**kwargs):
     """
     Continue a previously started training
     """
     # Get the Base folder with the data
-    base_folder = kwargs.get("base_folder", None)
+    base_folder = kwargs.get("base_folder")
     # Get the Base nanme for the datasets
-    base_name = kwargs.get("base_name", None)
+    base_name = kwargs.get("base_name")
     data_file = base_folder + base_name
     # Load the data
     x_train, y_train, x_test, y_test = get_dataset(data_file)
@@ -40,17 +40,17 @@ def continue_training(**kwargs):
     #     [0.5*np.pi] * data_info["features_number"],
     # )
     # Get Architecture Parameters
-    train_folder = base_folder + kwargs.get("train_folder", None)
+    train_folder = base_folder + kwargs.get("train_folder")
     with open(train_folder + "pqc_dict.json") as json_file:
         pqc_info = json.load(json_file)
     # Re create Architecture
     pqc, weights_names, features_names = hardware_efficient_ansatz(**pqc_info)
     observable = z_observable(**pqc_info)
     # Get the QPU info
-    qpu_info = kwargs.get("qpu_info", None)
+    qpu_info = kwargs.get("qpu_info")
     nbshots = 0
     # Get Optimizer INFO
-    optimizer_info = kwargs.get("optimizer_info", None)
+    optimizer_info = kwargs.get("optimizer_info")
     if optimizer_info is None:
         # Load default optimizer settings
         with open(train_folder + "optimizer_dict.json") as json_file:
@@ -61,37 +61,40 @@ def continue_training(**kwargs):
     # the optimizer_info
     points = optimizer_info["points"]
     # Get Dask client if provided
-    dask_client = kwargs.get("dask_client", None)
+    dask_client = kwargs.get("dask_client")
     # Configuration for workflows
     workflow_cfg = {
-        "pqc" : pqc,
-        "observable" : observable,
-        "weights_names" : weights_names,
-        "features_names" : features_names,
-        "nbshots" : nbshots,
-        "minval" : [data_info["minval"]] * data_info["features_number"],
-        "maxval" : [data_info["maxval"]] * data_info["features_number"],
-        "points" : points,
-        "qpu_info" : qpu_info
+        "pqc": pqc,
+        "observable": observable,
+        "weights_names": weights_names,
+        "features_names": features_names,
+        "nbshots": nbshots,
+        "minval": [data_info["minval"]] * data_info["features_number"],
+        "maxval": [data_info["maxval"]] * data_info["features_number"],
+        "points": points,
+        "qpu_info": qpu_info
     }
     # Configure the loss function for gradiente computation
-    qdml_loss_workflow_ = lambda w_, x_, y_: qdml_loss_workflow(
-        w_, x_, y_, dask_client=dask_client, **workflow_cfg)
+
+    def qdml_loss_workflow_(w_, x_, y_):
+        return qdml_loss_workflow(w_, x_, y_, dask_client=dask_client, **workflow_cfg)
     # Configure the numeric gradient function
-    numeric_gradient_ = lambda w_, x_, y_: numeric_gradient(
-        w_, x_, y_, qdml_loss_workflow_)
+
+    def numeric_gradient_(w_, x_, y_):
+        return numeric_gradient(w_, x_, y_, qdml_loss_workflow_)
     # Configure the loss function for evaluation
-    training_loss = lambda w_: qdml_loss_workflow(
-        w_, x_train, y_train, dask_client=dask_client, **workflow_cfg)
+
+    def training_loss(w_):
+        return qdml_loss_workflow(w_, x_train, y_train, dask_client=dask_client, **workflow_cfg)
     # Configure the MSE for evaluation in testing data
-    testing_metric = lambda w_: mse_workflow(
-        w_, x_test, y_test, dask_client=dask_client, **workflow_cfg)
+
+    def testing_metric(w_):
+        return mse_workflow(w_, x_test, y_test, dask_client=dask_client, **workflow_cfg)
     # Set the Batch size and th eBatch generator
-    batch_size = kwargs.get("batch_size", None)
+    batch_size = kwargs.get("batch_size")
     if batch_size is None:
         batch_size = len(x_train)
     batch_generator_ = batch_generator(x_train, y_train, batch_size)
-    save = True
 
     # Load Evolution from previous training
     file_to_load = train_folder + "evolution.csv"
@@ -104,8 +107,7 @@ def continue_training(**kwargs):
     print("initial_time: {}".format(initial_time))
     print("Initial weigths: \n {}".format(weights))
 
-
-    weights = adam_optimizer_loop(
+    return adam_optimizer_loop(
         weights_dict=weights,
         loss_function=training_loss,
         metric_function=testing_metric,
@@ -114,9 +116,6 @@ def continue_training(**kwargs):
         initial_time=initial_time,
         **optimizer_info
     )
-    return weights
-
-
 
 
 if __name__ == "__main__":
@@ -191,7 +190,7 @@ if __name__ == "__main__":
     # Defining QPU
     with open(args.json_qpu) as json_file:
         qpu_dict = json.load(json_file)
-    qpu_list = combination_for_list(qpu_dict)
+    qpu_list = list(qpu_dict.values())
     # Getting Optimizer Parameters
     if args.json_optimizer is not None:
         with open(args.json_optimizer) as json_file:

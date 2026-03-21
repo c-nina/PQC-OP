@@ -12,6 +12,8 @@ dependencies = [
     "torch",
     "pennylane>=0.38",
     "pennylane-lightning>=0.38",
+    "pandas>=2.3.3",
+    "scipy>=1.15.3",
 ]
 
 [project.optional-dependencies]
@@ -92,3 +94,9 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.15.7",
+]

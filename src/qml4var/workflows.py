@@ -9,27 +9,24 @@ All public functions preserve their original signatures so that existing
 notebook code requires minimal changes (only the workflow_cfg dict changes).
 """
 
-import numpy as np
 from itertools import product
 
+import numpy as np
 import torch
 
-from qml4var.losses import loss_function_qdml, mse, compute_integral
 from qml4var.data_utils import empirical_cdf
-
+from qml4var.losses import mse
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _weights_to_tensor(weights, device):
     """Convert weights (list or dict or tensor) to a float64 torch tensor."""
     if isinstance(weights, torch.Tensor):
         return weights
-    if isinstance(weights, dict):
-        values = list(weights.values())
-    else:
-        values = list(weights)
+    values = list(weights.values()) if isinstance(weights, dict) else list(weights)
     return torch.tensor(values, dtype=torch.float64, device=torch.device(device))
 
 
@@ -138,7 +135,8 @@ def workflow_for_cdf(weights, data_x, dask_client=None, **kwargs):
     -------
     dict with key 'y_predict_cdf' : np.array shape (N,)
     """
-    cdf_fn = lambda w, x: cdf_workflow(w, x, **kwargs)
+    def cdf_fn(w, x):
+        return cdf_workflow(w, x, **kwargs)
     preds = workflow_execution(weights, data_x, cdf_fn, dask_client=dask_client)
     if dask_client is not None:
         preds = dask_client.gather(preds)
@@ -153,7 +151,8 @@ def workflow_for_pdf(weights, data_x, dask_client=None, **kwargs):
     -------
     dict with key 'y_predict_pdf' : np.array shape (N,)
     """
-    pdf_fn = lambda w, x: pdf_workflow(w, x, **kwargs)
+    def pdf_fn(w, x):
+        return pdf_workflow(w, x, **kwargs)
     preds = workflow_execution(weights, data_x, pdf_fn, dask_client=dask_client)
     if dask_client is not None:
         preds = dask_client.gather(preds)
@@ -242,8 +241,7 @@ def _qdml_loss_torch(weights_t, data_x, data_y, circuit_fn, device, loss_weights
         )
         integral = pdf_sq_tensor.sum() * factor
 
-    loss = alpha_0 * loss_cdf + alpha_1 * (-2.0 * mean_pdf + integral)
-    return loss
+    return alpha_0 * loss_cdf + alpha_1 * (-2.0 * mean_pdf + integral)
 
 
 # ---------------------------------------------------------------------------
@@ -276,19 +274,16 @@ def qdml_loss_workflow(weights, data_x, data_y, dask_client=None, **kwargs):
 
     if isinstance(weights, torch.Tensor):
         # Called from torch_gradient: need create_graph=True for PDF term
-        result = _qdml_loss_torch(
+        return _qdml_loss_torch(
             weights, data_x, data_y, circuit_fn, device, loss_weights,
             minval, maxval, points, create_graph=True
         )
-        return result
-    else:
-        # Called for monitoring: create_graph=False, return plain float
-        weights_t = _weights_to_tensor(weights, device)
-        result = _qdml_loss_torch(
-            weights_t, data_x, data_y, circuit_fn, device, loss_weights,
-            minval, maxval, points, create_graph=False
-        )
-        return result.item()
+    # Called for monitoring: create_graph=False, return plain float
+    weights_t = _weights_to_tensor(weights, device)
+    return _qdml_loss_torch(
+        weights_t, data_x, data_y, circuit_fn, device, loss_weights,
+        minval, maxval, points, create_graph=False
+    ).item()
 
 
 def unsupervised_qdml_loss_workflow(

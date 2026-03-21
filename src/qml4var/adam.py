@@ -5,6 +5,7 @@ Adam
 import itertools
 import os
 from time import perf_counter
+
 import numpy as np
 import pandas as pd
 
@@ -63,6 +64,7 @@ def batch_generator(iterable, batch_size=1):
         else:
             break
 
+
 def initialize_adam(parameters):
     """
     Initialize the parameters of ADAM
@@ -72,6 +74,7 @@ def initialize_adam(parameters):
     s = np.zeros(len(parameters))
 
     return v, s
+
 
 # Update parameters using Adam
 def update_parameters_with_adam(
@@ -86,6 +89,7 @@ def update_parameters_with_adam(
     v_hat = v / (1.0 - beta2 ** (t + 1))
     x = x - learning_rate * s_hat / (np.sqrt(v_hat) + epsilon)
     return x, s, v
+
 
 def adam_optimizer_loop(
         weights_dict, loss_function, metric_function, gradient_function,
@@ -147,31 +151,31 @@ def adam_optimizer_loop(
     weights = list(weights_dict.values())
     weights_names = list(weights_dict.keys())
     # Init Adam
-    s_, v_ = initialize_adam(weights)#.keys())
+    s_, v_ = initialize_adam(weights)  # .keys())
     # ADAM time parameter
     t_ = initial_time
     # Tolerance steps
     n_tol = 0
 
     # Deal with save Folder
-    file_to_save = kwargs.get("file_to_save", None)
+    file_to_save = kwargs.get("file_to_save")
     # Configure Stop
-    epochs = kwargs.get("epochs", None)
-    tolerance = kwargs.get("tolerance", None)
-    n_counts_tolerance = kwargs.get("n_counts_tolerance", None)
+    epochs = kwargs.get("epochs")
+    tolerance = kwargs.get("tolerance")
+    n_counts_tolerance = kwargs.get("n_counts_tolerance")
     # Configure printing info
-    print_step = kwargs.get("print_step", None)
+    print_step = kwargs.get("print_step")
     # Configure Adam
-    learning_rate = kwargs.get("learning_rate", None)
-    beta1 = kwargs.get("beta1", None)
-    beta2 = kwargs.get("beta2", None)
+    learning_rate = kwargs.get("learning_rate")
+    beta1 = kwargs.get("beta1")
+    beta2 = kwargs.get("beta2")
     # Configure optional progress bar
     progress_bar = bool(kwargs.get("progress_bar", False))
     progress_desc = kwargs.get("progress_desc", "ADAM epochs")
     progress_leave = bool(kwargs.get("progress_leave", False))
 
     # Optional lightweight timing profiler
-    profile_timing = kwargs.get("profile_timing", None)
+    profile_timing = kwargs.get("profile_timing")
     if profile_timing is None:
         profile_timing = _env_flag("QML4VAR_PROFILE_TRAINING", False)
     profile_once = bool(kwargs.get("profile_once", _env_flag("QML4VAR_PROFILE_ONCE", True)))
@@ -203,7 +207,8 @@ def adam_optimizer_loop(
             weights, weights_names, t_, loss_0, metric_mse_0, file_to_save)
 
     converged = False
-    for t_ in range(t_, epochs):
+    start_t = t_
+    for t_ in range(start_t, epochs):
         epoch_t0 = perf_counter()
         grad_seconds = 0.0
         update_seconds = 0.0
@@ -237,10 +242,7 @@ def adam_optimizer_loop(
         loss_0 = loss_t
         # print("t= {} delta= {}".format(t_, delta))
         # print("t= {} n_tol= {}".format(t_, n_tol))
-        if delta < tolerance:
-            n_tol = n_tol + 1
-        else:
-            n_tol = 0
+        n_tol = n_tol + 1 if delta < tolerance else 0
         if t_ % print_step == 0:
             # Compute loss
             if metric_function is None:
@@ -267,10 +269,7 @@ def adam_optimizer_loop(
                 epoch_total - grad_seconds - update_seconds - loss_seconds - metric_seconds,
                 0.0,
             )
-            if profile_label:
-                label = " {}".format(profile_label)
-            else:
-                label = ""
+            label = " {}".format(profile_label) if profile_label else ""
             print(
                 "[PROFILE{}] epoch={} batches={} grad_s={:.3f} "
                 "update_s={:.3f} loss_s={:.3f} metric_s={:.3f} "
@@ -289,10 +288,7 @@ def adam_optimizer_loop(
 
         if n_tol >= n_counts_tolerance:
             print("Achieved Convergence. Delta: {}".format(delta))
-            if metric_function is None:
-                metric_mse_t = None
-            else:
-                metric_mse_t = metric_function(weights)
+            metric_mse_t = None if metric_function is None else metric_function(weights)
             save_stuff(
                 weights, weights_names, t_, loss_0, metric_mse_t, file_to_save)
             converged = True
@@ -302,10 +298,7 @@ def adam_optimizer_loop(
 
     if not converged:
         print("Maximum number of iterations achieved.")
-    if metric_function is None:
-        metric_mse_t = None
-    else:
-        metric_mse_t = metric_function(weights)
+    metric_mse_t = None if metric_function is None else metric_function(weights)
     save_stuff(
         weights, weights_names, t_, loss_t, metric_mse_t, file_to_save)
     if profile_timing and profile_once:
@@ -349,30 +342,30 @@ def adam_optimizer_loop(
 #     t_ = initial_time
 #     # Tolerance steps
 #     n_tol = 0
-# 
+#
 #     # Deal with save Folder
 #     file_to_save = kwargs.get("file_to_save", None)
 #     # Configure Stop
 #     n_iter = kwargs.get("n_iter", 200)
 #     tolerance = kwargs.get("tolerance", 1.0e-4)
 #     n_counts_tolerance = kwargs.get("n_counts_tolerance", 10)
-# 
+#
 #     # Configure printing info
 #     print_step = kwargs.get("print_step", 10)
-# 
+#
 #     # Configure Adam
 #     learning_rate = kwargs.get("learning_rate", 0.01)
 #     beta1 = kwargs.get("beta1", 0.9)
 #     beta2 = kwargs.get("beta2", 0.999)
-# 
-# 
+#
+#
 #     # Compute Initial Loss and Metric
 #     loss_0 = loss_function(weights)
 #     if metric_function is None:
 #         metric_mse_0 = None
 #     else:
 #         metric_mse_0 = metric_function(weights)
-# 
+#
 #     print("Loss Function at t={}: {}".format(t_, loss_0))
 #     print("MSE at t={}: {}".format(t_, metric_mse_0))
 #     if file_to_save is not None:
@@ -384,7 +377,7 @@ def adam_optimizer_loop(
 #             file_to_save, sep=";",
 #             index=True, mode='a', header=False
 #         )
-# 
+#
 #     contine_loop = True
 #     while contine_loop:
 #         for batch in batch_generator:
@@ -404,11 +397,11 @@ def adam_optimizer_loop(
 #             )
 #         loss_t = loss_function(weights)
 #         delta = -(loss_t - loss_0)
-# 
+#
 #         loss_0 = loss_t
 #         # print("t= {} delta= {}".format(t_, delta))
 #         # print("t= {} n_tol= {}".format(t_, n_tol))
-# 
+#
 #         if delta < tolerance:
 #             n_tol = n_tol + 1
 #         else:
@@ -430,7 +423,7 @@ def adam_optimizer_loop(
 #                     file_to_save, sep=";",
 #                     index=True, mode='a', header=False
 #                 )
-# 
+#
 #         if t_ >= n_iter:
 #             print("Maximum number of iterations achieved.")
 #             contine_loop = False

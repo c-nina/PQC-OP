@@ -3,8 +3,8 @@ Architectures and Architecture class definition (PennyLane backend)
 """
 
 import numpy as np
-import torch
 import pennylane as qml
+import torch
 
 
 def hardware_efficient_ansatz(**kwargs):
@@ -139,14 +139,8 @@ def normalize_data(min_value, max_value, min_x=None, max_x=None):
     """
     max_value_ = np.array(max_value)
     min_value_ = np.array(min_value)
-    if min_x is None:
-        min_x = np.array([-0.5 * np.pi])
-    else:
-        min_x = np.array(min_x)
-    if max_x is None:
-        max_x = np.array([-0.5 * np.pi])
-    else:
-        max_x = np.array(max_x)
+    min_x = np.array([-0.5 * np.pi]) if min_x is None else np.array(min_x)
+    max_x = np.array([-0.5 * np.pi]) if max_x is None else np.array(max_x)
     slope = (max_x - min_x) / (max_value_ - min_value_)
     b0 = min_x - slope * min_value_
     return slope, b0

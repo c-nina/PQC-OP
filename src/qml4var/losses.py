@@ -5,10 +5,10 @@ Functions for computing losses and gradients.
 import numpy as np
 import torch
 
-
 # ---------------------------------------------------------------------------
 # Numerical helpers (device-agnostic, kept for metric evaluation)
 # ---------------------------------------------------------------------------
+
 
 def _trapz_compat(y, x):
     """Compatibility wrapper for NumPy trapezoidal integration."""
