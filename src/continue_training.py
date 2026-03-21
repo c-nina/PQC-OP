@@ -34,13 +34,6 @@ def continue_training(**kwargs: Any):
     # Get Data INFO
     with open(base_folder + "data.json") as json_file:
         data_info = json.load(json_file)
-    # Normalization of the features
-    # base_frecuency, shift_feature = normalize_data(
-    #     [data_info["minval"]] * data_info["features_number"],
-    #     [data_info["maxval"]] * data_info["features_number"],
-    #     [-0.5*np.pi] * data_info["features_number"],
-    #     [0.5*np.pi] * data_info["features_number"],
-    # )
     # Get Architecture Parameters
     train_folder = base_folder + cast(str, kwargs.get("train_folder"))
     with open(train_folder + "pqc_dict.json") as json_file:
@@ -122,7 +115,6 @@ def continue_training(**kwargs: Any):
 
 if __name__ == "__main__":
     import argparse
-    # combination_for_list removed (benchmark_utils deleted)
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-base_folder",
