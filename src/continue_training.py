@@ -3,7 +3,9 @@ Functions for continue a training
 """
 import json
 import sys
+from typing import Any
 
+import numpy as np
 import pandas as pd
 
 sys.path.append("../../")
@@ -14,11 +16,11 @@ from qml4var.losses import numeric_gradient
 from qml4var.workflows import mse_workflow, qdml_loss_workflow
 
 
-def batch_generator(X, Y, batch_size):
+def batch_generator(X: np.ndarray, Y: np.ndarray, batch_size: int):
     return [(X[i:i + batch_size], Y[i:i + batch_size]) for i in range(0, len(X), batch_size)]
 
 
-def continue_training(**kwargs):
+def continue_training(**kwargs: Any):
     """
     Continue a previously started training
     """

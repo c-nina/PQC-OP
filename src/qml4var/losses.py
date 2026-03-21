@@ -2,6 +2,8 @@
 Functions for computing losses and gradients.
 """
 
+from typing import Any, Callable, List, Optional
+
 import numpy as np
 import torch
 
@@ -10,13 +12,13 @@ import torch
 # ---------------------------------------------------------------------------
 
 
-def _trapz_compat(y, x):
+def _trapz_compat(y: np.ndarray, x: np.ndarray):
     """Compatibility wrapper for NumPy trapezoidal integration."""
     trapz_fn = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
     return trapz_fn(y=y, x=x)
 
 
-def compute_integral(y_array, x_array, dask_client=None):
+def compute_integral(y_array: np.ndarray, x_array: np.ndarray, dask_client: Optional[Any] = None):
     """
     Numerical integral of y_array over x_array (trapezoidal or Monte Carlo).
 
@@ -56,13 +58,13 @@ def compute_integral(y_array, x_array, dask_client=None):
     return dask_client.submit(lambda x: np.sum(x) * factor, y_array)
 
 
-def trapezoidal_rule(x_domain, y_range):
+def trapezoidal_rule(x_domain: np.ndarray, y_range: np.ndarray):
     """Trapezoidal integration."""
     dx = np.diff(x_domain)
     return np.dot((y_range[:-1] + y_range[1:]) / 2, dx)
 
 
-def loss_function_qdml(labels, predict_cdf, predict_pdf, integral, loss_weights=None):
+def loss_function_qdml(labels: np.ndarray, predict_cdf: np.ndarray, predict_pdf: np.ndarray, integral: float, loss_weights: Optional[List[float]] = None):
     """
     QDML loss (numpy, for metric evaluation — not differentiated).
 
@@ -81,7 +83,7 @@ def loss_function_qdml(labels, predict_cdf, predict_pdf, integral, loss_weights=
     return alpha_0 * loss_1 + alpha_1 * (mean + integral)
 
 
-def mse(labels, prediction):
+def mse(labels: np.ndarray, prediction: np.ndarray):
     """Mean Squared Error (numpy)."""
     error_ = prediction - labels.reshape(prediction.shape)
     return np.mean(error_ ** 2)
@@ -91,7 +93,7 @@ def mse(labels, prediction):
 # PyTorch gradient (replaces numeric_gradient)
 # ---------------------------------------------------------------------------
 
-def torch_gradient(weights, data_x, data_y, loss_fn):
+def torch_gradient(weights: list, data_x: np.ndarray, data_y: np.ndarray, loss_fn: Callable):
     """
     Compute the gradient of loss_fn w.r.t. weights using PyTorch autograd
     (backpropagation through the PennyLane QNode).
@@ -125,7 +127,7 @@ def torch_gradient(weights, data_x, data_y, loss_fn):
 # Legacy numeric gradient (kept for reference / SPSA notebooks)
 # ---------------------------------------------------------------------------
 
-def numeric_gradient(weights, data_x, data_y, loss):
+def numeric_gradient(weights: list, data_x: np.ndarray, data_y: np.ndarray, loss: Callable):
     """
     Finite-difference gradient (legacy). Prefer torch_gradient for speed.
 

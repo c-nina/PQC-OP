@@ -5,6 +5,7 @@ Functions for creating DataSets
 import json
 import sys
 from itertools import product
+from typing import Any
 
 import numpy as np
 from scipy.stats import multivariate_normal, norm
@@ -13,7 +14,7 @@ sys.path.append("../../")
 from qml4var.data_utils import bs_cdf, bs_samples, empirical_cdf, saving_datasets
 
 
-def create_random_data(**kwargs):
+def create_random_data(**kwargs: Any):
     """
     Create DataSets
 
@@ -79,7 +80,7 @@ def create_random_data(**kwargs):
     return train_x, train_y, test_x, test_y
 
 
-def create_bs_data(**kwargs):
+def create_bs_data(**kwargs: Any):
     """
     Create DataSets with Black Scholes. Only for 1 input feature
 

@@ -10,6 +10,7 @@ notebook code requires minimal changes (only the workflow_cfg dict changes).
 """
 
 from itertools import product
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import torch
@@ -22,7 +23,7 @@ from qml4var.losses import mse
 # ---------------------------------------------------------------------------
 
 
-def _weights_to_tensor(weights, device):
+def _weights_to_tensor(weights: Union[list, dict, torch.Tensor], device: str):
     """Convert weights (list or dict or tensor) to a float64 torch tensor."""
     if isinstance(weights, torch.Tensor):
         return weights
@@ -30,7 +31,7 @@ def _weights_to_tensor(weights, device):
     return torch.tensor(values, dtype=torch.float64, device=torch.device(device))
 
 
-def _trapz_torch(y_tensor, x_tensor):
+def _trapz_torch(y_tensor: torch.Tensor, x_tensor: torch.Tensor):
     """Trapezoidal integration on torch tensors (differentiable)."""
     if hasattr(torch, "trapezoid"):
         return torch.trapezoid(y_tensor, x_tensor)
@@ -41,7 +42,7 @@ def _trapz_torch(y_tensor, x_tensor):
 # Single-sample evaluation (no gradient tracking on weights)
 # ---------------------------------------------------------------------------
 
-def cdf_workflow(weights, x_sample, **kwargs):
+def cdf_workflow(weights: Union[list, dict, torch.Tensor], x_sample: np.ndarray, **kwargs: Any):
     """
     Evaluate CDF for one sample.
 
@@ -74,7 +75,7 @@ def cdf_workflow(weights, x_sample, **kwargs):
     return result.item()
 
 
-def pdf_workflow(weights, x_sample, **kwargs):
+def pdf_workflow(weights: Union[list, dict, torch.Tensor], x_sample: np.ndarray, **kwargs: Any):
     """
     Evaluate PDF for one sample via autograd: PDF = d(CDF)/d(raw_feature).
 
@@ -107,7 +108,7 @@ def pdf_workflow(weights, x_sample, **kwargs):
 # Dataset-level evaluation
 # ---------------------------------------------------------------------------
 
-def workflow_execution(weights, data_x, workflow, dask_client=None):
+def workflow_execution(weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, workflow: Callable, dask_client: Optional[Any] = None):
     """
     Execute a workflow function for every sample in data_x.
 
@@ -127,7 +128,7 @@ def workflow_execution(weights, data_x, workflow, dask_client=None):
     return dask_client.map(workflow, *([weights] * data_x.shape[0], data_x))
 
 
-def workflow_for_cdf(weights, data_x, dask_client=None, **kwargs):
+def workflow_for_cdf(weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, dask_client: Optional[Any] = None, **kwargs: Any):
     """
     Compute CDF predictions for a dataset.
 
@@ -143,7 +144,7 @@ def workflow_for_cdf(weights, data_x, dask_client=None, **kwargs):
     return {"y_predict_cdf": np.array(preds)}
 
 
-def workflow_for_pdf(weights, data_x, dask_client=None, **kwargs):
+def workflow_for_pdf(weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, dask_client: Optional[Any] = None, **kwargs: Any):
     """
     Compute PDF predictions for a dataset.
 
@@ -163,8 +164,8 @@ def workflow_for_pdf(weights, data_x, dask_client=None, **kwargs):
 # Differentiable loss (used by torch_gradient)
 # ---------------------------------------------------------------------------
 
-def _qdml_loss_torch(weights_t, data_x, data_y, circuit_fn, device, loss_weights,
-                     minval, maxval, points, create_graph=False):
+def _qdml_loss_torch(weights_t: torch.Tensor, data_x: np.ndarray, data_y: np.ndarray, circuit_fn: Callable, device: str, loss_weights: list,
+                     minval: Union[float, list], maxval: Union[float, list], points: int, create_graph: bool = False):
     """
     Compute QDML loss as a torch scalar.
 
@@ -248,7 +249,7 @@ def _qdml_loss_torch(weights_t, data_x, data_y, circuit_fn, device, loss_weights
 # High-level workflow functions (same API as before)
 # ---------------------------------------------------------------------------
 
-def qdml_loss_workflow(weights, data_x, data_y, dask_client=None, **kwargs):
+def qdml_loss_workflow(weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, data_y: np.ndarray, dask_client: Optional[Any] = None, **kwargs: Any):
     """
     Compute QDML loss.
 
@@ -287,11 +288,11 @@ def qdml_loss_workflow(weights, data_x, data_y, dask_client=None, **kwargs):
 
 
 def unsupervised_qdml_loss_workflow(
-        weights,
-        data_x,
-        dask_client=None,
-        empirical_shift=-0.5,
-        **kwargs):
+        weights: Union[list, dict, torch.Tensor],
+        data_x: np.ndarray,
+        dask_client: Optional[Any] = None,
+        empirical_shift: float = -0.5,
+        **kwargs: Any):
     """
     Unsupervised QDML loss: labels built from empirical CDF of data_x.
 
@@ -310,20 +311,20 @@ def unsupervised_qdml_loss_workflow(
     )
 
 
-def mse_workflow(weights, data_x, data_y, dask_client=None, **kwargs):
+def mse_workflow(weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, data_y: np.ndarray, dask_client: Optional[Any] = None, **kwargs: Any):
     """MSE of CDF predictions (numpy, for metric evaluation)."""
     out = workflow_for_cdf(weights, data_x, dask_client=dask_client, **kwargs)
     return mse(data_y, out["y_predict_cdf"])
 
 
 def dft_from_trained_pqc(
-        weights,
-        minval=-2.0 * np.pi,
-        maxval=2.0 * np.pi,
-        points=256,
-        prediction="cdf",
-        dask_client=None,
-        **kwargs):
+        weights: Union[list, dict, torch.Tensor],
+        minval: float = -2.0 * np.pi,
+        maxval: float = 2.0 * np.pi,
+        points: int = 256,
+        prediction: str = "cdf",
+        dask_client: Optional[Any] = None,
+        **kwargs: Any):
     """
     Compute DFT coefficients from direct evaluations of a trained PQC.
 

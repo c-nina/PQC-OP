@@ -3,6 +3,7 @@ Functions for heliping to build the datasets
 """
 import json
 import pathlib
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -38,7 +39,7 @@ def empirical_distribution_function_old(data_points: np.array):
     return distribution
 
 
-def empirical_cdf(data_points):
+def empirical_cdf(data_points: np.ndarray):
     """
     Given an array of data points create the corresponding empirical
     distribution function
@@ -96,7 +97,7 @@ def bs_samples(
         volatility * dW * np.sqrt(maturity))
 
 
-def saving_datasets(x_train, y_train, x_test, y_test, **kwargs):
+def saving_datasets(x_train: np.ndarray, y_train: np.ndarray, x_test: np.ndarray, y_test: np.ndarray, **kwargs: Any):
     """
     Saving Data sets
     """
@@ -114,7 +115,7 @@ def saving_datasets(x_train, y_train, x_test, y_test, **kwargs):
         pathlib.Path(kwargs.get("folder_path") + "/data.json").write_text(json.dumps(kwargs))
 
 
-def get_dataset(name_for_loading):
+def get_dataset(name_for_loading: str):
     # load Datasets
     pdf_training = pd.read_csv(
         name_for_loading + "_training.csv", sep=";", index_col=0

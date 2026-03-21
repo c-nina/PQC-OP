@@ -5,6 +5,7 @@ Adam
 import itertools
 import os
 from time import perf_counter
+from typing import Any, Callable, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -15,7 +16,7 @@ except Exception:  # pragma: no cover
     _tqdm = None
 
 
-def _env_flag(name, default=False):
+def _env_flag(name: str, default: bool = False):
     """
     Parse boolean-like environment variables.
     """
@@ -25,7 +26,7 @@ def _env_flag(name, default=False):
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _env_int(name, default):
+def _env_int(name: str, default: int):
     """
     Parse integer environment variables.
     """
@@ -39,7 +40,7 @@ def _env_int(name, default):
 
 
 def save_stuff(
-        weights, weights_names, t_, loss_, metric_mse_=None, file_to_save=None):
+        weights: list, weights_names: List[str], t_: int, loss_: float, metric_mse_: Optional[float] = None, file_to_save: Optional[str] = None):
     """
     Save stuff
     """
@@ -54,7 +55,7 @@ def save_stuff(
         )
 
 
-def batch_generator(iterable, batch_size=1):
+def batch_generator(iterable: Iterable, batch_size: int = 1):
     iterable = iter(iterable)
 
     while True:
@@ -65,7 +66,7 @@ def batch_generator(iterable, batch_size=1):
             break
 
 
-def initialize_adam(parameters):
+def initialize_adam(parameters: list):
     """
     Initialize the parameters of ADAM
     """
@@ -78,8 +79,8 @@ def initialize_adam(parameters):
 
 # Update parameters using Adam
 def update_parameters_with_adam(
-    x, grads, s, v, t, learning_rate=0.01,
-    beta1=0.9, beta2=0.999, epsilon=1e-8):
+    x: np.ndarray, grads: np.ndarray, s: np.ndarray, v: np.ndarray, t: int, learning_rate: float = 0.01,
+    beta1: float = 0.9, beta2: float = 0.999, epsilon: float = 1e-8):
     """
     Update the parameters of ADAM
     """
@@ -92,8 +93,8 @@ def update_parameters_with_adam(
 
 
 def adam_optimizer_loop(
-        weights_dict, loss_function, metric_function, gradient_function,
-        batch_generator, initial_time=0, **kwargs):
+        weights_dict: dict, loss_function: Callable, metric_function: Optional[Callable], gradient_function: Callable,
+        batch_generator: Iterable, initial_time: int = 0, **kwargs: Any):
     """
     Parameters
     ----------

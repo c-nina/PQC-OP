@@ -2,12 +2,14 @@
 Architectures and Architecture class definition (PennyLane backend)
 """
 
+from typing import Any, List, Optional
+
 import numpy as np
 import pennylane as qml
 import torch
 
 
-def hardware_efficient_ansatz(**kwargs):
+def hardware_efficient_ansatz(**kwargs: Any):
     """
     Create a hardware efficient ansatz as a PennyLane QNode.
 
@@ -117,7 +119,7 @@ def hardware_efficient_ansatz(**kwargs):
     return circuit, weights_names, features_names
 
 
-def normalize_data(min_value, max_value, min_x=None, max_x=None):
+def normalize_data(min_value: list, max_value: list, min_x: Optional[list] = None, max_x: Optional[list] = None):
     """
     Feature Normalization.
 
@@ -146,7 +148,7 @@ def normalize_data(min_value, max_value, min_x=None, max_x=None):
     return slope, b0
 
 
-def init_weights(weights_names):
+def init_weights(weights_names: List[str]):
     """
     Initialize PQC weights uniformly in [0, 1).
 

@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import uuid
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -21,7 +22,7 @@ from qml4var.losses import numeric_gradient
 from qml4var.workflows import mse_workflow
 
 
-def store_info(base_folder, optimizer_dict, pqc_dict):
+def store_info(base_folder: str, optimizer_dict: dict, pqc_dict: dict):
     """"
     Function for saving Initial Info
     Parameters
@@ -50,11 +51,11 @@ def store_info(base_folder, optimizer_dict, pqc_dict):
     return unique_directory
 
 
-def batch_generator(X, Y, batch_size):
+def batch_generator(X: np.ndarray, Y: np.ndarray, batch_size: int):
     return [(X[i:i + batch_size], Y[i:i + batch_size]) for i in range(0, len(X), batch_size)]
 
 
-def new_training(**kwargs):
+def new_training(**kwargs: Any):
     # Get the Base folder with the data
     base_folder = kwargs.get("base_folder")
     # Get the Base nanme for the datasets

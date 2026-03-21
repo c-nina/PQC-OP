@@ -1,5 +1,7 @@
 """Utility routines for CrisTFM experiments (PennyLane backend)."""
 
+from typing import Any, Callable, Optional, Union
+
 import numpy as np
 import torch
 
@@ -8,7 +10,7 @@ import torch
 # ---------------------------------------------------------------------------
 
 
-def _weights_to_tensor(weights, device):
+def _weights_to_tensor(weights: Union[list, dict, torch.Tensor], device: str):
     if isinstance(weights, torch.Tensor):
         return weights
     values = list(weights.values()) if isinstance(weights, dict) else list(weights)
@@ -19,7 +21,7 @@ def _weights_to_tensor(weights, device):
 # Single-sample workflow functions (PennyLane replacements)
 # ---------------------------------------------------------------------------
 
-def cdf_workflow_cris(weights, x_sample, **kwargs):
+def cdf_workflow_cris(weights: Union[list, dict, torch.Tensor], x_sample: np.ndarray, **kwargs: Any):
     """
     Compute CDF for one sample.
 
@@ -45,7 +47,7 @@ def cdf_workflow_cris(weights, x_sample, **kwargs):
     return result.item()
 
 
-def pdf_workflow_cris(weights, x_sample, **kwargs):
+def pdf_workflow_cris(weights: Union[list, dict, torch.Tensor], x_sample: np.ndarray, **kwargs: Any):
     """
     Compute PDF = d(CDF)/d(raw_feature) for one sample.
 
@@ -73,7 +75,7 @@ def pdf_workflow_cris(weights, x_sample, **kwargs):
     return x_t.grad.sum().item()
 
 
-def pdf_derivative_workflow_cris(weights, x_sample, **kwargs):
+def pdf_derivative_workflow_cris(weights: Union[list, dict, torch.Tensor], x_sample: np.ndarray, **kwargs: Any):
     """
     Compute d(PDF)/dx = d²(CDF)/dx² for one sample via second-order autograd.
 
@@ -102,7 +104,7 @@ def pdf_derivative_workflow_cris(weights, x_sample, **kwargs):
     return pdf_deriv.sum().item()
 
 
-def workflow_execution_cris(weights, data_x, workflow, dask_client=None):
+def workflow_execution_cris(weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, workflow: Callable, dask_client: Optional[Any] = None):
     """Execute one workflow for all input samples."""
     if dask_client is None:
         return [workflow(weights, x_) for x_ in data_x]
@@ -110,12 +112,12 @@ def workflow_execution_cris(weights, data_x, workflow, dask_client=None):
 
 
 def workflow_for_pdf_and_derivative_cris(
-        weights,
-        data_x,
-        labels_pdf=None,
-        labels_pdf_derivative=None,
-        dask_client=None,
-        **kwargs):
+        weights: Union[list, dict, torch.Tensor],
+        data_x: np.ndarray,
+        labels_pdf: Optional[np.ndarray] = None,
+        labels_pdf_derivative: Optional[np.ndarray] = None,
+        dask_client: Optional[Any] = None,
+        **kwargs: Any):
     """
     Compute PDF and d(PDF)/dx predictions for a full dataset.
 
@@ -168,7 +170,7 @@ def workflow_for_pdf_and_derivative_cris(
 # Fourier analysis (device-independent, unchanged)
 # ---------------------------------------------------------------------------
 
-def complex_fourier_coefficients(x_domain, y_predict, k_values, interval=None):
+def complex_fourier_coefficients(x_domain: np.ndarray, y_predict: np.ndarray, k_values: Union[int, np.ndarray], interval: Optional[tuple] = None):
     """
     Compute complex Fourier coefficients c_k from sampled function values.
 
@@ -224,7 +226,7 @@ def complex_fourier_coefficients(x_domain, y_predict, k_values, interval=None):
     return k_values, c_k
 
 
-def fourier_series_from_coefficients(x_domain, k_values, c_k, interval=None):
+def fourier_series_from_coefficients(x_domain: np.ndarray, k_values: np.ndarray, c_k: np.ndarray, interval: Optional[tuple] = None):
     """Reconstruct f(x) from complex Fourier coefficients."""
     x_domain = np.asarray(x_domain).reshape(-1)
     k_values = np.asarray(k_values, dtype=int).reshape(-1)
@@ -245,7 +247,7 @@ def fourier_series_from_coefficients(x_domain, k_values, c_k, interval=None):
     return np.dot(c_k, exponent)
 
 
-def ak_bk_from_complex_coefficients(k_values, c_k, k_max=None):
+def ak_bk_from_complex_coefficients(k_values: np.ndarray, c_k: np.ndarray, k_max: Optional[int] = None):
     """
     Compute A_k^f and B_k^f from complex exponential Fourier coefficients c_k.
 
@@ -279,8 +281,8 @@ def ak_bk_from_complex_coefficients(k_values, c_k, k_max=None):
     return k_non_negative, a_k_f, b_k_f
 
 
-def fourier_price_v_t0(a, b, risk_free_rate, delta_t, a_k_f, b_k_f,
-                       c_k_payoff, d_k_payoff):
+def fourier_price_v_t0(a: float, b: float, risk_free_rate: float, delta_t: float, a_k_f: np.ndarray, b_k_f: np.ndarray,
+                       c_k_payoff: np.ndarray, d_k_payoff: np.ndarray):
     """
     Compute V(t0, x) from Fourier coefficients:
 
@@ -315,12 +317,12 @@ def fourier_price_v_t0(a, b, risk_free_rate, delta_t, a_k_f, b_k_f,
 # ---------------------------------------------------------------------------
 
 def loss_function_pdf_and_derivative(
-        labels_pdf,
-        predict_pdf,
-        predict_pdf_derivative,
-        labels_pdf_derivative=None,
-        integral_pdf_sq=0.0,
-        loss_weights=(0.9, 0.1, 0.0)):
+        labels_pdf: np.ndarray,
+        predict_pdf: np.ndarray,
+        predict_pdf_derivative: np.ndarray,
+        labels_pdf_derivative: Optional[np.ndarray] = None,
+        integral_pdf_sq: float = 0.0,
+        loss_weights: tuple = (0.9, 0.1, 0.0)):
     """
     L = alpha_pdf * E_pdf + alpha_derivative * E_der + alpha_integral * I
     """
@@ -348,7 +350,7 @@ def loss_function_pdf_and_derivative(
     )
 
 
-def loss_function_qdml(labels, predict_cdf, predict_pdf, integral):
+def loss_function_qdml(labels: np.ndarray, predict_cdf: np.ndarray, predict_pdf: np.ndarray, integral: float):
     """Legacy QDML loss (numpy, for reference)."""
     alpha_0 = 0
     alpha_1 = 0.5
