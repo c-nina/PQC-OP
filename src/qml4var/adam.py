@@ -1,4 +1,4 @@
-""""
+""" "
 Adam
 """
 
@@ -40,7 +40,13 @@ def _env_int(name: str, default: int):
 
 
 def save_stuff(
-        weights: list, weights_names: List[str], t_: int, loss_: float, metric_mse_: Optional[float] = None, file_to_save: Optional[str] = None):
+    weights: list,
+    weights_names: List[str],
+    t_: int,
+    loss_: float,
+    metric_mse_: Optional[float] = None,
+    file_to_save: Optional[str] = None,
+):
     """
     Save stuff
     """
@@ -49,10 +55,7 @@ def save_stuff(
     pdf["loss"] = loss_
     pdf["metric_mse"] = metric_mse_
     if file_to_save is not None:
-        pdf.to_csv(
-            file_to_save, sep=";",
-            index=True, mode='a', header=False
-        )
+        pdf.to_csv(file_to_save, sep=";", index=True, mode="a", header=False)
 
 
 def batch_generator(iterable: Iterable, batch_size: int = 1):
@@ -79,13 +82,21 @@ def initialize_adam(parameters: list):
 
 # Update parameters using Adam
 def update_parameters_with_adam(
-    x: np.ndarray, grads: np.ndarray, s: np.ndarray, v: np.ndarray, t: int, learning_rate: float = 0.01,
-    beta1: float = 0.9, beta2: float = 0.999, epsilon: float = 1e-8):
+    x: np.ndarray,
+    grads: np.ndarray,
+    s: np.ndarray,
+    v: np.ndarray,
+    t: int,
+    learning_rate: float = 0.01,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    epsilon: float = 1e-8,
+):
     """
     Update the parameters of ADAM
     """
     s = beta1 * s + (1.0 - beta1) * grads
-    v = beta2 * v + (1.0 - beta2) * grads ** 2
+    v = beta2 * v + (1.0 - beta2) * grads**2
     s_hat = s / (1.0 - beta1 ** (t + 1))
     v_hat = v / (1.0 - beta2 ** (t + 1))
     x = x - learning_rate * s_hat / (np.sqrt(v_hat) + epsilon)
@@ -93,8 +104,14 @@ def update_parameters_with_adam(
 
 
 def adam_optimizer_loop(
-        weights_dict: dict, loss_function: Callable, metric_function: Optional[Callable], gradient_function: Callable,
-        batch_generator: Iterable, initial_time: int = 0, **kwargs: Any):
+    weights_dict: dict,
+    loss_function: Callable,
+    metric_function: Optional[Callable],
+    gradient_function: Callable,
+    batch_generator: Iterable,
+    initial_time: int = 0,
+    **kwargs: Any,
+):
     """
     Parameters
     ----------
@@ -180,9 +197,7 @@ def adam_optimizer_loop(
     if profile_timing is None:
         profile_timing = _env_flag("QML4VAR_PROFILE_TRAINING", False)
     profile_once = bool(kwargs.get("profile_once", _env_flag("QML4VAR_PROFILE_ONCE", True)))
-    profile_first_n_epochs = int(
-        kwargs.get("profile_first_n_epochs", _env_int("QML4VAR_PROFILE_EPOCHS", 1))
-    )
+    profile_first_n_epochs = int(kwargs.get("profile_first_n_epochs", _env_int("QML4VAR_PROFILE_EPOCHS", 1)))
     profile_label = kwargs.get("profile_label", os.getenv("QML4VAR_PROFILE_LABEL", ""))
     if profile_timing and profile_once and getattr(adam_optimizer_loop, "_profile_done", False):
         profile_timing = False
@@ -204,8 +219,7 @@ def adam_optimizer_loop(
         metric_mse_0 = metric_function(weights)
         print("Loss Function at t={}: {}".format(t_, loss_0))
         print("MSE at t={}: {}".format(t_, metric_mse_0))
-        save_stuff(
-            weights, weights_names, t_, loss_0, metric_mse_0, file_to_save)
+        save_stuff(weights, weights_names, t_, loss_0, metric_mse_0, file_to_save)
 
     converged = False
     start_t = t_
@@ -222,17 +236,12 @@ def adam_optimizer_loop(
             batch_y = batch[1]
             # Compute gradient on batches
             grad_t0 = perf_counter()
-            loss_gradient = np.array(gradient_function(
-                weights, batch_x, batch_y
-            ))
+            loss_gradient = np.array(gradient_function(weights, batch_x, batch_y))
             grad_seconds += perf_counter() - grad_t0
             # Update Weights
             update_t0 = perf_counter()
             weights, s_, v_ = update_parameters_with_adam(
-                weights, loss_gradient, s_, v_, t_,
-                learning_rate=learning_rate,
-                beta1=beta1,
-                beta2=beta2
+                weights, loss_gradient, s_, v_, t_, learning_rate=learning_rate, beta1=beta1, beta2=beta2
             )
             update_seconds += perf_counter() - update_t0
             n_batches = n_batches + 1
@@ -252,8 +261,7 @@ def adam_optimizer_loop(
                 metric_seconds += perf_counter() - metric_t0
             print("\t MSE at t={}: {}".format(t_, metric_mse_t))
             print("\t Iteracion: {}. Loss: {}".format(t_, loss_t))
-            save_stuff(
-                weights, weights_names, t_, loss_0, metric_mse_t, file_to_save)
+            save_stuff(weights, weights_names, t_, loss_0, metric_mse_t, file_to_save)
 
         if pbar is not None:
             pbar.update(1)
@@ -288,8 +296,7 @@ def adam_optimizer_loop(
         if n_tol >= n_counts_tolerance:
             print("Achieved Convergence. Delta: {}".format(delta))
             metric_mse_t = None if metric_function is None else metric_function(weights)
-            save_stuff(
-                weights, weights_names, t_, loss_0, metric_mse_t, file_to_save)
+            save_stuff(weights, weights_names, t_, loss_0, metric_mse_t, file_to_save)
             converged = True
             break
     if pbar is not None:
@@ -298,8 +305,7 @@ def adam_optimizer_loop(
     if not converged:
         print("Maximum number of iterations achieved.")
     metric_mse_t = None if metric_function is None else metric_function(weights)
-    save_stuff(
-        weights, weights_names, t_, loss_t, metric_mse_t, file_to_save)
+    save_stuff(weights, weights_names, t_, loss_t, metric_mse_t, file_to_save)
     if profile_timing and profile_once:
         adam_optimizer_loop._profile_done = True
     return weights

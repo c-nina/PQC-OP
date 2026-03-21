@@ -21,6 +21,7 @@ def _weights_to_tensor(weights: Union[list, dict, torch.Tensor], device: str):
 # Single-sample workflow functions (PennyLane replacements)
 # ---------------------------------------------------------------------------
 
+
 def cdf_workflow_cris(weights: Union[list, dict, torch.Tensor], x_sample: np.ndarray, **kwargs: Any):
     """
     Compute CDF for one sample.
@@ -67,9 +68,7 @@ def pdf_workflow_cris(weights: Union[list, dict, torch.Tensor], x_sample: np.nda
         w_t = w_t.detach()
 
     x_flat = np.asarray(x_sample).reshape(-1)
-    x_t = torch.tensor(
-        x_flat, dtype=torch.float64, device=torch.device(device), requires_grad=True
-    )
+    x_t = torch.tensor(x_flat, dtype=torch.float64, device=torch.device(device), requires_grad=True)
     cdf = circuit_fn(w_t, x_t)
     cdf.backward()
     return x_t.grad.sum().item()
@@ -95,16 +94,16 @@ def pdf_derivative_workflow_cris(weights: Union[list, dict, torch.Tensor], x_sam
         w_t = w_t.detach()
 
     x_flat = np.asarray(x_sample).reshape(-1)
-    x_t = torch.tensor(
-        x_flat, dtype=torch.float64, device=torch.device(device), requires_grad=True
-    )
+    x_t = torch.tensor(x_flat, dtype=torch.float64, device=torch.device(device), requires_grad=True)
     cdf = circuit_fn(w_t, x_t)
     pdf = torch.autograd.grad(cdf, x_t, create_graph=True)[0]
     pdf_deriv = torch.autograd.grad(pdf.sum(), x_t)[0]
     return pdf_deriv.sum().item()
 
 
-def workflow_execution_cris(weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, workflow: Callable, dask_client: Optional[Any] = None):
+def workflow_execution_cris(
+    weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, workflow: Callable, dask_client: Optional[Any] = None
+):
     """Execute one workflow for all input samples."""
     if dask_client is None:
         return [workflow(weights, x_) for x_ in data_x]
@@ -112,12 +111,13 @@ def workflow_execution_cris(weights: Union[list, dict, torch.Tensor], data_x: np
 
 
 def workflow_for_pdf_and_derivative_cris(
-        weights: Union[list, dict, torch.Tensor],
-        data_x: np.ndarray,
-        labels_pdf: Optional[np.ndarray] = None,
-        labels_pdf_derivative: Optional[np.ndarray] = None,
-        dask_client: Optional[Any] = None,
-        **kwargs: Any):
+    weights: Union[list, dict, torch.Tensor],
+    data_x: np.ndarray,
+    labels_pdf: Optional[np.ndarray] = None,
+    labels_pdf_derivative: Optional[np.ndarray] = None,
+    dask_client: Optional[Any] = None,
+    **kwargs: Any,
+):
     """
     Compute PDF and d(PDF)/dx predictions for a full dataset.
 
@@ -133,27 +133,22 @@ def workflow_for_pdf_and_derivative_cris(
     -------
     dict with predict_pdf, predict_pdf_derivative, and optionally labels.
     """
+
     def pdf_fn(w, x):
         return pdf_workflow_cris(w, x, **kwargs)
 
     def pdf_deriv_fn(w, x):
         return pdf_derivative_workflow_cris(w, x, **kwargs)
 
-    predict_pdf = workflow_execution_cris(
-        weights, data_x, pdf_fn, dask_client=dask_client
-    )
-    predict_pdf_derivative = workflow_execution_cris(
-        weights, data_x, pdf_deriv_fn, dask_client=dask_client
-    )
+    predict_pdf = workflow_execution_cris(weights, data_x, pdf_fn, dask_client=dask_client)
+    predict_pdf_derivative = workflow_execution_cris(weights, data_x, pdf_deriv_fn, dask_client=dask_client)
 
     if dask_client is None:
         predict_pdf = np.asarray(predict_pdf).reshape(-1, 1)
         predict_pdf_derivative = np.asarray(predict_pdf_derivative).reshape(-1, 1)
     else:
         predict_pdf = np.asarray(dask_client.gather(predict_pdf)).reshape(-1, 1)
-        predict_pdf_derivative = np.asarray(
-            dask_client.gather(predict_pdf_derivative)
-        ).reshape(-1, 1)
+        predict_pdf_derivative = np.asarray(dask_client.gather(predict_pdf_derivative)).reshape(-1, 1)
 
     output = {
         "predict_pdf": predict_pdf,
@@ -170,7 +165,10 @@ def workflow_for_pdf_and_derivative_cris(
 # Fourier analysis (device-independent, unchanged)
 # ---------------------------------------------------------------------------
 
-def complex_fourier_coefficients(x_domain: np.ndarray, y_predict: np.ndarray, k_values: Union[int, np.ndarray], interval: Optional[tuple] = None):
+
+def complex_fourier_coefficients(
+    x_domain: np.ndarray, y_predict: np.ndarray, k_values: Union[int, np.ndarray], interval: Optional[tuple] = None
+):
     """
     Compute complex Fourier coefficients c_k from sampled function values.
 
@@ -226,7 +224,9 @@ def complex_fourier_coefficients(x_domain: np.ndarray, y_predict: np.ndarray, k_
     return k_values, c_k
 
 
-def fourier_series_from_coefficients(x_domain: np.ndarray, k_values: np.ndarray, c_k: np.ndarray, interval: Optional[tuple] = None):
+def fourier_series_from_coefficients(
+    x_domain: np.ndarray, k_values: np.ndarray, c_k: np.ndarray, interval: Optional[tuple] = None
+):
     """Reconstruct f(x) from complex Fourier coefficients."""
     x_domain = np.asarray(x_domain).reshape(-1)
     k_values = np.asarray(k_values, dtype=int).reshape(-1)
@@ -281,8 +281,16 @@ def ak_bk_from_complex_coefficients(k_values: np.ndarray, c_k: np.ndarray, k_max
     return k_non_negative, a_k_f, b_k_f
 
 
-def fourier_price_v_t0(a: float, b: float, risk_free_rate: float, delta_t: float, a_k_f: np.ndarray, b_k_f: np.ndarray,
-                       c_k_payoff: np.ndarray, d_k_payoff: np.ndarray):
+def fourier_price_v_t0(
+    a: float,
+    b: float,
+    risk_free_rate: float,
+    delta_t: float,
+    a_k_f: np.ndarray,
+    b_k_f: np.ndarray,
+    c_k_payoff: np.ndarray,
+    d_k_payoff: np.ndarray,
+):
     """
     Compute V(t0, x) from Fourier coefficients:
 
@@ -294,10 +302,7 @@ def fourier_price_v_t0(a: float, b: float, risk_free_rate: float, delta_t: float
     c_k_payoff = np.asarray(c_k_payoff, dtype=complex).reshape(-1)
     d_k_payoff = np.asarray(d_k_payoff, dtype=complex).reshape(-1)
 
-    if not (
-        a_k_f.shape[0] == b_k_f.shape[0]
-        == c_k_payoff.shape[0] == d_k_payoff.shape[0]
-    ):
+    if not (a_k_f.shape[0] == b_k_f.shape[0] == c_k_payoff.shape[0] == d_k_payoff.shape[0]):
         raise ValueError("All coefficient arrays must have the same length")
     if a_k_f.size == 0:
         raise ValueError("Coefficient arrays can not be empty")
@@ -306,9 +311,7 @@ def fourier_price_v_t0(a: float, b: float, risk_free_rate: float, delta_t: float
 
     series_term = 0.5 * a_k_f[0] * c_k_payoff[0]
     if a_k_f.size > 1:
-        series_term += np.sum(
-            a_k_f[1:] * c_k_payoff[1:] + b_k_f[1:] * d_k_payoff[1:]
-        )
+        series_term += np.sum(a_k_f[1:] * c_k_payoff[1:] + b_k_f[1:] * d_k_payoff[1:])
     return 0.5 * (b - a) * np.exp(-risk_free_rate * delta_t) * series_term
 
 
@@ -316,13 +319,15 @@ def fourier_price_v_t0(a: float, b: float, risk_free_rate: float, delta_t: float
 # Loss functions (device-independent, unchanged)
 # ---------------------------------------------------------------------------
 
+
 def loss_function_pdf_and_derivative(
-        labels_pdf: np.ndarray,
-        predict_pdf: np.ndarray,
-        predict_pdf_derivative: np.ndarray,
-        labels_pdf_derivative: Optional[np.ndarray] = None,
-        integral_pdf_sq: float = 0.0,
-        loss_weights: tuple = (0.9, 0.1, 0.0)):
+    labels_pdf: np.ndarray,
+    predict_pdf: np.ndarray,
+    predict_pdf_derivative: np.ndarray,
+    labels_pdf_derivative: Optional[np.ndarray] = None,
+    integral_pdf_sq: float = 0.0,
+    loss_weights: tuple = (0.9, 0.1, 0.0),
+):
     """
     L = alpha_pdf * E_pdf + alpha_derivative * E_der + alpha_integral * I
     """
@@ -332,22 +337,14 @@ def loss_function_pdf_and_derivative(
     pdf_error = np.mean((predict_pdf - labels_pdf) ** 2)
 
     if labels_pdf_derivative is None:
-        derivative_error = np.mean(predict_pdf_derivative ** 2)
+        derivative_error = np.mean(predict_pdf_derivative**2)
     else:
         if predict_pdf_derivative.shape != labels_pdf_derivative.shape:
-            raise ValueError(
-                "predict_pdf_derivative and labels_pdf_derivative have different shape"
-            )
-        derivative_error = np.mean(
-            (predict_pdf_derivative - labels_pdf_derivative) ** 2
-        )
+            raise ValueError("predict_pdf_derivative and labels_pdf_derivative have different shape")
+        derivative_error = np.mean((predict_pdf_derivative - labels_pdf_derivative) ** 2)
 
     alpha_pdf, alpha_derivative, alpha_integral = loss_weights
-    return (
-        alpha_pdf * pdf_error
-        + alpha_derivative * derivative_error
-        + alpha_integral * float(integral_pdf_sq)
-    )
+    return alpha_pdf * pdf_error + alpha_derivative * derivative_error + alpha_integral * float(integral_pdf_sq)
 
 
 def loss_function_qdml(labels: np.ndarray, predict_cdf: np.ndarray, predict_pdf: np.ndarray, integral: float):
@@ -357,7 +354,7 @@ def loss_function_qdml(labels: np.ndarray, predict_cdf: np.ndarray, predict_pdf:
     if predict_cdf.shape != labels.shape:
         raise ValueError("predict_cdf and labels have different shape!!")
     error_ = predict_cdf - labels
-    loss_1 = np.mean(error_ ** 2)
+    loss_1 = np.mean(error_**2)
     if predict_pdf.shape != labels.shape:
         raise ValueError("predict_pdf and labels have different shape!!")
     mean = -2 * np.mean(predict_pdf)

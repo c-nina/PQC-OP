@@ -1,6 +1,7 @@
 """
 Functions for heliping to build the datasets
 """
+
 import json
 import pathlib
 from typing import Any
@@ -55,14 +56,12 @@ def empirical_cdf(data_points: np.ndarray):
     if len(data_points.shape) == 1:
         data_points = data_points.reshape((data_points.shape[0], 1))
 
-    return np.array(
-        [np.sum(np.all(data_points <= x, axis=1)) for x in data_points]
-    ) / data_points.shape[0]
+    return np.array([np.sum(np.all(data_points <= x, axis=1)) for x in data_points]) / data_points.shape[0]
 
 
 def bs_pdf(
-        s_t: float, s_0: float = 1.0, risk_free_rate: float = 0.0,
-        volatility: float = 0.5, maturity: float = 0.5, **kwargs):
+    s_t: float, s_0: float = 1.0, risk_free_rate: float = 0.0, volatility: float = 0.5, maturity: float = 0.5, **kwargs
+):
     """
     Black Scholes PDF
     """
@@ -74,8 +73,8 @@ def bs_pdf(
 
 
 def bs_cdf(
-        s_t: float, s_0: float = 1.0, risk_free_rate: float = 0.0,
-        volatility: float = 0.5, maturity: float = 0.5, **kwargs):
+    s_t: float, s_0: float = 1.0, risk_free_rate: float = 0.0, volatility: float = 0.5, maturity: float = 0.5, **kwargs
+):
     """
     Black Scholes PDF
     """
@@ -85,16 +84,21 @@ def bs_cdf(
 
 
 def bs_samples(
-        number_samples: int, s_0: float = 1.0, risk_free_rate: float = 0.0,
-        volatility: float = 0.5, maturity: float = 0.5, **kwargs):
+    number_samples: int,
+    s_0: float = 1.0,
+    risk_free_rate: float = 0.0,
+    volatility: float = 0.5,
+    maturity: float = 0.5,
+    **kwargs,
+):
     """
     Black Scholes Samples
     """
 
     dW = np.random.randn(number_samples)
     return s_0 * np.exp(
-        (risk_free_rate - 0.5 * volatility * volatility) * maturity +
-        volatility * dW * np.sqrt(maturity))
+        (risk_free_rate - 0.5 * volatility * volatility) * maturity + volatility * dW * np.sqrt(maturity)
+    )
 
 
 def saving_datasets(x_train: np.ndarray, y_train: np.ndarray, x_test: np.ndarray, y_test: np.ndarray, **kwargs: Any):
@@ -108,21 +112,15 @@ def saving_datasets(x_train: np.ndarray, y_train: np.ndarray, x_test: np.ndarray
         pdf_training["Labels"] = y_train
         pdf_testing = pd.DataFrame(x_test, columns=features)
         pdf_testing["Labels"] = y_test
-        pdf_training.to_csv(
-            name_for_saving + "_training.csv", sep=";", index=True)
-        pdf_testing.to_csv(
-            name_for_saving + "_testing.csv", sep=";", index=True)
+        pdf_training.to_csv(name_for_saving + "_training.csv", sep=";", index=True)
+        pdf_testing.to_csv(name_for_saving + "_testing.csv", sep=";", index=True)
         pathlib.Path(kwargs.get("folder_path") + "/data.json").write_text(json.dumps(kwargs))
 
 
 def get_dataset(name_for_loading: str):
     # load Datasets
-    pdf_training = pd.read_csv(
-        name_for_loading + "_training.csv", sep=";", index_col=0
-    )
-    pdf_testing = pd.read_csv(
-        name_for_loading + "_testing.csv", sep=";", index_col=0
-    )
+    pdf_training = pd.read_csv(name_for_loading + "_training.csv", sep=";", index_col=0)
+    pdf_testing = pd.read_csv(name_for_loading + "_testing.csv", sep=";", index_col=0)
     feat = [col for col in pdf_training.columns if "Features" in col]
     x_train = pdf_training[feat].values
     y_train = pdf_training["Labels"].values

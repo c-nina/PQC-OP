@@ -60,9 +60,7 @@ def hardware_efficient_ansatz(**kwargs: Any):
     for layer_ in range(n_layers):
         for input_ in range(features_number):
             for qubit_ in range(n_qubits_by_feature):
-                weights_names.append(
-                    "weights_{}_{}_{}".format(layer_, input_, qubit_)
-                )
+                weights_names.append("weights_{}_{}_{}".format(layer_, input_, qubit_))
 
     # Capture normalization constants as tensors
     bf = torch.tensor(base_frecuency, dtype=torch.float64)
@@ -93,10 +91,7 @@ def hardware_efficient_ansatz(**kwargs: Any):
 
         for layer_ in range(n_layers):
             for input_ in range(features_number):
-                base_w = (
-                    layer_ * features_number * n_qubits_by_feature
-                    + input_ * n_qubits_by_feature
-                )
+                base_w = layer_ * features_number * n_qubits_by_feature + input_ * n_qubits_by_feature
                 for qubit_ in range(n_qubits_by_feature):
                     actual_qubit = input_ * n_qubits_by_feature + qubit_
                     qml.RX(weights[base_w + qubit_], wires=actual_qubit)

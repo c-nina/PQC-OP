@@ -42,9 +42,7 @@ def compute_integral(y_array: np.ndarray, x_array: np.ndarray, dask_client: Opti
 
     if x_array.shape[1] == 2:
         if dask_client is None:
-            x_domain, y_domain = np.meshgrid(
-                np.unique(x_array[:, 0]), np.unique(x_array[:, 1])
-            )
+            x_domain, y_domain = np.meshgrid(np.unique(x_array[:, 0]), np.unique(x_array[:, 1]))
             y_array_ = y_array.reshape(x_domain.shape)
             return _trapz_compat(_trapz_compat(y=y_array_, x=x_domain), y_domain[:, 0])
         factor = np.prod(x_array.max(axis=0) - x_array.min(axis=0)) / len(y_array)
@@ -64,7 +62,13 @@ def trapezoidal_rule(x_domain: np.ndarray, y_range: np.ndarray):
     return np.dot((y_range[:-1] + y_range[1:]) / 2, dx)
 
 
-def loss_function_qdml(labels: np.ndarray, predict_cdf: np.ndarray, predict_pdf: np.ndarray, integral: float, loss_weights: Optional[List[float]] = None):
+def loss_function_qdml(
+    labels: np.ndarray,
+    predict_cdf: np.ndarray,
+    predict_pdf: np.ndarray,
+    integral: float,
+    loss_weights: Optional[List[float]] = None,
+):
     """
     QDML loss (numpy, for metric evaluation — not differentiated).
 
@@ -76,7 +80,7 @@ def loss_function_qdml(labels: np.ndarray, predict_cdf: np.ndarray, predict_pdf:
     if predict_cdf.shape != labels.shape:
         raise ValueError("predict_cdf and labels have different shape!")
     error_ = predict_cdf - labels
-    loss_1 = np.mean(error_ ** 2)
+    loss_1 = np.mean(error_**2)
     if predict_pdf.shape != labels.shape:
         raise ValueError("predict_pdf and labels have different shape!")
     mean = -2 * np.mean(predict_pdf)
@@ -86,12 +90,13 @@ def loss_function_qdml(labels: np.ndarray, predict_cdf: np.ndarray, predict_pdf:
 def mse(labels: np.ndarray, prediction: np.ndarray):
     """Mean Squared Error (numpy)."""
     error_ = prediction - labels.reshape(prediction.shape)
-    return np.mean(error_ ** 2)
+    return np.mean(error_**2)
 
 
 # ---------------------------------------------------------------------------
 # PyTorch gradient (replaces numeric_gradient)
 # ---------------------------------------------------------------------------
+
 
 def torch_gradient(weights: list, data_x: np.ndarray, data_y: np.ndarray, loss_fn: Callable):
     """
@@ -127,6 +132,7 @@ def torch_gradient(weights: list, data_x: np.ndarray, data_y: np.ndarray, loss_f
 # Legacy numeric gradient (kept for reference / SPSA notebooks)
 # ---------------------------------------------------------------------------
 
+
 def numeric_gradient(weights: list, data_x: np.ndarray, data_y: np.ndarray, loss: Callable):
     """
     Finite-difference gradient (legacy). Prefer torch_gradient for speed.
@@ -144,6 +150,7 @@ def numeric_gradient(weights: list, data_x: np.ndarray, data_y: np.ndarray, loss
     list of float
     """
     import copy
+
     gradient_i = []
     epsilon = 1.0e-7
     for i, weight in enumerate(weights):
