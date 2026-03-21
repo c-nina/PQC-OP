@@ -1,0 +1,94 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qml4var"
+version = "0.1.0"
+description = "Quantum Machine Learning for Value-at-Risk estimation"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "torch",
+    "pennylane>=0.38",
+    "pennylane-lightning>=0.38",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qml4var"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+preview = true
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "ASYNC",
+    "COM",
+    "FA",
+    "FLY",
+    "FURB",
+    "ICN",
+    "INT",
+    "ISC",
+    "LOG",
+    "N",
+    "PIE",
+    "PLE",
+    "Q",
+    "RET",
+    "RSE",
+    "SIM",
+    "SLOT",
+    "T10",
+    "TC",
+    "TID",
+    "W",
+    "YTT",
+]
+ignore = [
+    "COM812",
+    "COM819",
+    "D206",
+    "D300",
+    "E111",
+    "E114",
+    "E117",
+    "E501",
+    "ISC001",
+    "ISC002",
+    "Q000",
+    "Q001",
+    "Q002",
+    "Q003",
+    "W191",
+    "N802",
+    "N803",
+    "N806",
+]
+fixable = ["ALL"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["qml4var"]
+force-single-line = false
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

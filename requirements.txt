@@ -1,4 +1,0 @@
-numpy
-torch
-pennylane>=0.38
-pennylane-lightning>=0.38
