@@ -129,3 +129,68 @@ def get_dataset(name_for_loading: str):
     y_test = pdf_testing["Labels"].values
     y_test = y_test.reshape((-1, 1))
     return x_train, y_train, x_test, y_test
+
+
+def simulate_black_scholes_data_rescaled(
+    S0_: float,
+    r_: float,
+    T_: float,
+    sigma_: float,
+    K_: float,
+    n_points: int,
+    seed: int,
+):
+    """
+    Simulate Black-Scholes log-moneyness samples and rescale to [-pi, pi].
+
+    Parameters
+    ----------
+    S0_, r_, T_, sigma_ : Black-Scholes parameters
+    K_                  : strike price
+    n_points            : number of samples
+    seed                : random seed
+
+    Returns
+    -------
+    x_t       : raw log-moneyness array, shape (n_points, 1)
+    u_t       : rescaled values in [-pi, pi], shape (n_points, 1)
+    x_min_raw : minimum of x_t (used for inverse rescaling)
+    x_max_raw : maximum of x_t (used for inverse rescaling)
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    z = rng.standard_normal(n_points)
+    s_t = S0_ * np.exp((r_ - 0.5 * sigma_**2) * T_ + sigma_ * np.sqrt(T_) * z)
+    x_t = np.log(s_t / K_)
+
+    x_min_raw = float(np.min(x_t))
+    x_max_raw = float(np.max(x_t))
+    if x_max_raw <= x_min_raw:
+        x_max_raw = x_min_raw + 1.0e-8
+
+    u_t = 2.0 * np.pi * (x_t - x_min_raw) / (x_max_raw - x_min_raw) - np.pi
+    return x_t.reshape(-1, 1), u_t.reshape(-1, 1), x_min_raw, x_max_raw
+
+
+def inverse_rescaling_u_to_xt(
+    u_values,
+    x_min_raw: float,
+    x_max_raw: float,
+):
+    """
+    Invert the [-pi, pi] rescaling back to raw log-moneyness.
+
+    Parameters
+    ----------
+    u_values            : array of rescaled values in [-pi, pi]
+    x_min_raw, x_max_raw: bounds returned by simulate_black_scholes_data_rescaled
+
+    Returns
+    -------
+    numpy array of raw log-moneyness values
+    """
+    import numpy as np
+
+    u_values = np.asarray(u_values)
+    return x_min_raw + (u_values + np.pi) * (x_max_raw - x_min_raw) / (2.0 * np.pi)

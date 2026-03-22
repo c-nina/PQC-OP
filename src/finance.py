@@ -482,3 +482,271 @@ def loss_function_qdml(labels: np.ndarray, predict_cdf: np.ndarray, predict_pdf:
         raise ValueError("predict_pdf and labels have different shape!!")
     mean = -2 * np.mean(predict_pdf)
     return alpha_0 * loss_1 + alpha_1 * (mean + integral)
+
+
+# ---------------------------------------------------------------------------
+# Black-Scholes analytical pricing
+# ---------------------------------------------------------------------------
+
+
+def bs_put_price(
+    S0_: float,
+    K_: float,
+    r_: float,
+    sigma_: float,
+    T_: float,
+) -> float:
+    """
+    Black-Scholes closed-form price for a European put option.
+
+    Parameters
+    ----------
+    S0_   : initial stock price
+    K_    : strike price
+    r_    : risk-free rate
+    sigma_: volatility
+    T_    : time to maturity
+
+    Returns
+    -------
+    float : put option price
+    """
+    from scipy.stats import norm
+
+    d1 = (np.log(S0_ / K_) + (r_ + 0.5 * sigma_**2) * T_) / (sigma_ * np.sqrt(T_))
+    d2 = d1 - sigma_ * np.sqrt(T_)
+    return K_ * np.exp(-r_ * T_) * norm.cdf(-d2) - S0_ * norm.cdf(-d1)
+
+
+# ---------------------------------------------------------------------------
+# Post-training inference: estimate option price from a trained PQC
+# ---------------------------------------------------------------------------
+
+
+def estimate_price_from_trained_pqc(
+    weights,
+    artifacts: dict,
+    K_: float,
+    x_min_raw: float,
+    x_max_raw: float,
+    train_interval: tuple,
+    risk_free_rate: float,
+    delta_t: float,
+    k_terms: int = 12,
+    grid_points: int = 1024,
+    dask_client=None,
+    debug: bool = False,
+    debug_label: str = "",
+) -> float:
+    """
+    Method I — PDF-based Fourier pricing.
+
+    Evaluates the trained PQC as a PDF on a dense grid, normalises it,
+    computes Fourier coefficients, and recovers the put option price via
+    the Fourier pricing formula (fourier_price_v_t0).
+
+    Parameters
+    ----------
+    weights        : trained circuit weights (list, dict, or torch.Tensor)
+    artifacts      : dict returned by build_mode_artifacts (contains workflow_cfg)
+    K_             : strike price
+    x_min_raw      : minimum log-moneyness from training data (for rescaling)
+    x_max_raw      : maximum log-moneyness from training data (for rescaling)
+    train_interval : (a, b) domain used during training, e.g. (-2pi, 2pi)
+    risk_free_rate : annualised risk-free rate
+    delta_t        : time to maturity
+    k_terms        : number of Fourier harmonics (default 12)
+    grid_points    : number of evaluation points on the grid (default 1024)
+    dask_client    : optional Dask client for distributed evaluation
+    debug          : if True, print intermediate diagnostics
+    debug_label    : label string for debug messages
+
+    Returns
+    -------
+    float : estimated put option price, or np.nan on failure
+    """
+    from qml4var.data_utils import inverse_rescaling_u_to_xt
+    from qml4var.workflows import workflow_for_pdf
+
+    trapz_fn = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+
+    workflow_cfg = artifacts["workflow_cfg"]
+    a, b = train_interval
+    u_grid = np.linspace(a, b, grid_points).reshape(-1, 1)
+
+    pdf_raw = workflow_for_pdf(weights, u_grid, dask_client=dask_client, **workflow_cfg)["y_predict_pdf"].reshape(-1)
+    pdf_pred = np.nan_to_num(pdf_raw, nan=0.0, posinf=0.0, neginf=0.0)
+    pdf_pred = np.clip(pdf_pred, 0.0, None)
+
+    area = trapz_fn(pdf_pred, u_grid[:, 0])
+
+    if debug:
+        print(
+            f"[PRICE DEBUG] {debug_label} "
+            f"pdf_min={np.min(pdf_pred):.6e} pdf_max={np.max(pdf_pred):.6e} area={area:.6e}"
+        )
+
+    if (not np.isfinite(area)) or np.isclose(area, 0.0):
+        print(
+            f"[WARN price] {debug_label} invalid area. "
+            f"pdf_min={np.min(pdf_pred):.6e} pdf_max={np.max(pdf_pred):.6e} area={area}"
+        )
+        return np.nan
+
+    pdf_pred = pdf_pred / area
+
+    if np.allclose(pdf_pred, 0.0):
+        print(f"[WARN price] {debug_label} normalized pdf collapsed to zeros")
+        return np.nan
+
+    k_vals, c_k = complex_fourier_coefficients(
+        x_domain=u_grid[:, 0],
+        y_predict=pdf_pred,
+        k_values=k_terms,
+        interval=(a, b),
+    )
+    _, A_k_f, B_k_f = ak_bk_from_complex_coefficients(k_vals, c_k, k_max=k_terms)
+
+    x_raw_grid = inverse_rescaling_u_to_xt(u_grid[:, 0], x_min_raw, x_max_raw)
+    payoff = np.maximum(K_ * (1.0 - np.exp(x_raw_grid)), 0.0)
+
+    L = b - a
+    z = (u_grid[:, 0] - a) / L
+    C_k = np.zeros(k_terms + 1, dtype=complex)
+    D_k = np.zeros(k_terms + 1, dtype=complex)
+    for k in range(k_terms + 1):
+        angle = 2.0 * np.pi * k * z
+        C_k[k] = (2.0 / L) * trapz_fn(payoff * np.cos(angle), u_grid[:, 0])
+        D_k[k] = 0.0 if k == 0 else (2.0 / L) * trapz_fn(payoff * np.sin(angle), u_grid[:, 0])
+
+    v_t0 = fourier_price_v_t0(
+        a=a,
+        b=b,
+        risk_free_rate=risk_free_rate,
+        delta_t=delta_t,
+        a_k_f=A_k_f,
+        b_k_f=B_k_f,
+        c_k_payoff=C_k,
+        d_k_payoff=D_k,
+    )
+    return float(np.real(v_t0))
+
+
+def estimate_price_ibp(
+    weights,
+    artifacts: dict,
+    K_: float,
+    x_min_raw: float,
+    x_max_raw: float,
+    train_interval: tuple,
+    risk_free_rate: float,
+    delta_t: float,
+    k_terms: int = 12,
+    grid_points: int = 1024,
+    dask_client=None,
+    debug: bool = False,
+    debug_label: str = "",
+) -> float:
+    """
+    Method II — Integration-by-parts (IBP) pricing using CDF Fourier coefficients.
+
+    Avoids differentiating the learned PDF; instead uses the CDF directly and
+    applies the IBP identity:
+        V = e^{-rT} [h(b)F(b) - h(a)F(a) - integral_a^b h'(x) F(x) dx]
+
+    The CDF is extended to a doubled interval to suppress Gibbs oscillations,
+    and the payoff derivative integral is split at the exercise boundary c
+    (where log-moneyness = 0).
+
+    Parameters
+    ----------
+    weights        : trained circuit weights
+    artifacts      : dict returned by build_mode_artifacts
+    K_             : strike price
+    x_min_raw      : minimum log-moneyness from training data
+    x_max_raw      : maximum log-moneyness from training data
+    train_interval : (a, b) domain used during training, e.g. (-2pi, 2pi)
+    risk_free_rate : annualised risk-free rate
+    delta_t        : time to maturity
+    k_terms        : number of Fourier harmonics (default 12)
+    grid_points    : number of evaluation points on the grid (default 1024)
+    dask_client    : optional Dask client for distributed evaluation
+    debug          : if True, print intermediate diagnostics
+    debug_label    : label string for debug messages
+
+    Returns
+    -------
+    float : estimated put option price
+    """
+    from qml4var.data_utils import inverse_rescaling_u_to_xt
+    from qml4var.workflows import workflow_for_cdf
+
+    workflow_cfg = artifacts["workflow_cfg"]
+    a, b = train_interval
+    L = b - a
+    L_ext = 2.0 * L
+    a_ext = (3.0 * a - b) / 2.0
+    b_ext = a_ext + L_ext
+
+    u_inner = np.linspace(a, b, grid_points).reshape(-1, 1)
+    u_flat = u_inner[:, 0]
+
+    cdf_raw = workflow_for_cdf(weights, u_inner, dask_client=dask_client, **workflow_cfg)["y_predict_cdf"].reshape(-1)
+    cdf_inner = np.clip(cdf_raw + 0.5, 0.0, 1.0)
+
+    F_at_a = float(cdf_inner[0])
+    F_at_b = float(cdf_inner[-1])
+
+    if debug:
+        print(
+            f"[IBP DEBUG] {debug_label} F(a)={F_at_a:.4f} F(b)={F_at_b:.4f}"
+            f" cdf_min={cdf_inner.min():.4f} cdf_max={cdf_inner.max():.4f}"
+        )
+
+    u_ext = np.linspace(a_ext, b_ext, grid_points)
+    cdf_ext = np.where(
+        u_ext < a,
+        0.0,
+        np.where(u_ext > b, 1.0, np.interp(u_ext, u_flat, cdf_inner)),
+    )
+
+    k_vals, c_k = complex_fourier_coefficients(u_ext, cdf_ext, k_terms, interval=(a_ext, b_ext))
+    _, A_k_F, B_k_F = ak_bk_from_complex_coefficients(k_vals, c_k, k_max=k_terms)
+
+    x_raw_a = inverse_rescaling_u_to_xt(a, x_min_raw, x_max_raw)
+    x_raw_b = inverse_rescaling_u_to_xt(b, x_min_raw, x_max_raw)
+    h_at_a = float(np.maximum(K_ * (1.0 - np.exp(x_raw_a)), 0.0))
+    h_at_b = float(np.maximum(K_ * (1.0 - np.exp(x_raw_b)), 0.0))
+
+    if x_max_raw > x_min_raw:
+        u_c = 2.0 * np.pi * (0.0 - x_min_raw) / (x_max_raw - x_min_raw) - np.pi
+    else:
+        u_c = 0.0
+    u_c = float(np.clip(u_c, a + 1e-8, b - 1e-8))
+
+    x_raw_grid = inverse_rescaling_u_to_xt(u_flat, x_min_raw, x_max_raw)
+    dx_du = (x_max_raw - x_min_raw) / (2.0 * np.pi)
+    h_prime = np.where(u_flat < u_c, -K_ * np.exp(x_raw_grid) * dx_du, 0.0)
+
+    mask_a = u_flat <= u_c
+    mask_b = u_flat > u_c
+
+    C_k_a, D_k_a = payoff_derivative_fourier_coefficients(u_flat[mask_a], h_prime[mask_a], k_terms, a_ext, L_ext)
+    C_k_b, D_k_b = payoff_derivative_fourier_coefficients(u_flat[mask_b], h_prime[mask_b], k_terms, a_ext, L_ext)
+
+    return fourier_price_v_t0_ibp(
+        a=a,
+        b=b,
+        risk_free_rate=risk_free_rate,
+        delta_t=delta_t,
+        a_k_F=A_k_F,
+        b_k_F=B_k_F,
+        c_k_a=C_k_a,
+        d_k_a=D_k_a,
+        c_k_b=C_k_b,
+        d_k_b=D_k_b,
+        h_at_a=h_at_a,
+        F_at_a=F_at_a,
+        h_at_b=h_at_b,
+        F_at_b=F_at_b,
+    )
