@@ -281,6 +281,129 @@ def ak_bk_from_complex_coefficients(k_values: np.ndarray, c_k: np.ndarray, k_max
     return k_non_negative, a_k_f, b_k_f
 
 
+def payoff_derivative_fourier_coefficients(
+    x_domain: np.ndarray,
+    h_prime: np.ndarray,
+    k_max: int,
+    a_ext: float,
+    L_ext: float,
+) -> tuple:
+    """
+    Fourier coefficients of h'(x) on a sub-interval using extended period L_ext.
+
+    Used for the anti-Gibbs treatment in Method II (CDF-based) pricing.
+    Both C_k and D_k use the same reference point a_ext and period L_ext,
+    which must match those used for the CDF coefficients A_k^F, B_k^F.
+
+        C_k = (2 / L_ext) * integral h'(x) * cos(2*pi*k*(x - a_ext) / L_ext) dx
+        D_k = (2 / L_ext) * integral h'(x) * sin(2*pi*k*(x - a_ext) / L_ext) dx
+
+    Parameters
+    ----------
+    x_domain : array, grid points inside the sub-interval [x1, x2] ⊆ [a, b]
+    h_prime  : array, values of h'(x) at x_domain
+    k_max    : int, highest Fourier harmonic (coefficients 0 … k_max)
+    a_ext    : float, left boundary of extended interval = (3a - b) / 2
+    L_ext    : float, extended period = 2*(b - a)
+
+    Returns
+    -------
+    C_k, D_k : arrays of shape (k_max + 1,)
+    """
+    x_domain = np.asarray(x_domain, dtype=float).reshape(-1)
+    h_prime = np.asarray(h_prime, dtype=float).reshape(-1)
+    trapz_fn = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+
+    k_arr = np.arange(k_max + 1, dtype=float)
+    C_k = np.zeros(k_max + 1)
+    D_k = np.zeros(k_max + 1)
+
+    if x_domain.size < 2:
+        return C_k, D_k
+
+    # phase[k, i] = 2*pi*k*(x_i - a_ext) / L_ext
+    phase = 2.0 * np.pi * np.outer(k_arr, (x_domain - a_ext) / L_ext)  # (K+1, N)
+
+    C_k = (2.0 / L_ext) * trapz_fn(h_prime[np.newaxis, :] * np.cos(phase), x_domain, axis=1)
+    D_k = (2.0 / L_ext) * trapz_fn(h_prime[np.newaxis, :] * np.sin(phase), x_domain, axis=1)
+    D_k[0] = 0.0  # by definition (sin(0) = 0)
+
+    return C_k, D_k
+
+
+def fourier_price_v_t0_ibp(
+    a: float,
+    b: float,
+    risk_free_rate: float,
+    delta_t: float,
+    a_k_F: np.ndarray,
+    b_k_F: np.ndarray,
+    c_k_a: np.ndarray,
+    d_k_a: np.ndarray,
+    c_k_b: np.ndarray,
+    d_k_b: np.ndarray,
+    h_at_a: float,
+    F_at_a: float,
+    h_at_b: float,
+    F_at_b: float,
+) -> float:
+    """
+    Option price via integration by parts with payoff-derivative split at c.
+
+    Derivation
+    ----------
+    V = e^{-rT} * integral_a^b h(x) f(x) dx
+      = e^{-rT} * [h(b)F(b) - h(a)F(a) - integral_a^b h'(x) F(x) dx]
+
+    The last integral is split at c (where h' is discontinuous) and each
+    piece is evaluated via Parseval's theorem using Fourier series with
+    extended period L_ext = 2*(b-a):
+
+      integral_a^c h'(x)F(x)dx = (L_ext/2) * [A0^F*C0^a/2 + sum(Ak^F*Ck^a + Bk^F*Dk^a)]
+      integral_c^b h'(x)F(x)dx = (L_ext/2) * [A0^F*C0^b/2 + sum(Ak^F*Ck^b + Bk^F*Dk^b)]
+
+    where L_ext/2 = b - a.
+
+    Parameters
+    ----------
+    a, b             : float, training domain bounds
+    risk_free_rate   : float
+    delta_t          : float, time to maturity
+    a_k_F, b_k_F     : CDF Fourier coefficients (computed with period L_ext)
+    c_k_a, d_k_a     : h' Fourier coefficients on [a, c] (period L_ext)
+    c_k_b, d_k_b     : h' Fourier coefficients on [c, b] (period L_ext)
+    h_at_a, F_at_a   : payoff and CDF at left boundary
+    h_at_b, F_at_b   : payoff and CDF at right boundary
+
+    Returns
+    -------
+    float : estimated option price V(t0)
+    """
+    a_k_F = np.asarray(a_k_F, dtype=complex).reshape(-1)
+    b_k_F = np.asarray(b_k_F, dtype=complex).reshape(-1)
+    c_k_a = np.asarray(c_k_a, dtype=float).reshape(-1)
+    d_k_a = np.asarray(d_k_a, dtype=float).reshape(-1)
+    c_k_b = np.asarray(c_k_b, dtype=float).reshape(-1)
+    d_k_b = np.asarray(d_k_b, dtype=float).reshape(-1)
+
+    if not (len(a_k_F) == len(b_k_F) == len(c_k_a) == len(d_k_a) == len(c_k_b) == len(d_k_b)):
+        raise ValueError("All coefficient arrays must have the same length")
+
+    boundary = float(h_at_b) * float(F_at_b) - float(h_at_a) * float(F_at_a)
+
+    # L_ext / 2 = b - a  (the Parseval prefactor)
+    L_ext_half = float(b) - float(a)
+
+    series_a = 0.5 * a_k_F[0] * c_k_a[0]
+    series_b = 0.5 * a_k_F[0] * c_k_b[0]
+    if len(a_k_F) > 1:
+        series_a += np.sum(a_k_F[1:] * c_k_a[1:] + b_k_F[1:] * d_k_a[1:])
+        series_b += np.sum(a_k_F[1:] * c_k_b[1:] + b_k_F[1:] * d_k_b[1:])
+
+    discount = np.exp(-float(risk_free_rate) * float(delta_t))
+    return float(np.real(discount * (boundary - L_ext_half * (series_a + series_b))))
+
+
 def fourier_price_v_t0(
     a: float,
     b: float,
