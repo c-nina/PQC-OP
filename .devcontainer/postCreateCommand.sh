@@ -8,7 +8,7 @@ sudo apt-get install -y -t testing libstdc++6
 
 # 2. Instalar dependencias de Python
 pip3 install --upgrade pip
-pip3 install -r requirements.txt
+pip3 install -e ".[dev]"
 
 # 3. Otros comandos
 npm install -g @openai/codex
