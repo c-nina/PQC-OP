@@ -252,7 +252,10 @@ def run_single(
         progress_leave=False,
     )
 
-    # ── 7. Option pricing ─────────────────────────────────────────────────────
+    # ── 7. Save final weights ─────────────────────────────────────────────────
+    np.save(run_folder / "final_weights.npy", np.array(final_weights))
+
+    # ── 8. Option pricing ─────────────────────────────────────────────────────
     artifacts = {"workflow_cfg": workflow_cfg}
     price_kwargs = dict(
         weights=final_weights,
