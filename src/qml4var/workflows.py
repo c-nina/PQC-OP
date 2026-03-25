@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import torch
+from torch.func import vmap as _vmap
 
 from qml4var.data_utils import empirical_cdf
 from qml4var.losses import mse
@@ -134,40 +135,59 @@ def workflow_for_cdf(
     weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, dask_client: Optional[Any] = None, **kwargs: Any
 ):
     """
-    Compute CDF predictions for a dataset.
+    Compute CDF predictions for a dataset (batched via qml.vmap).
 
     Returns
     -------
     dict with key 'y_predict_cdf' : np.array shape (N,)
     """
-
-    def cdf_fn(w, x):
-        return cdf_workflow(w, x, **kwargs)
-
-    preds = workflow_execution(weights, data_x, cdf_fn, dask_client=dask_client)
     if dask_client is not None:
-        preds = dask_client.gather(preds)
-    return {"y_predict_cdf": np.array(preds)}
+        def cdf_fn(w, x):
+            return cdf_workflow(w, x, **kwargs)
+        preds = dask_client.gather(workflow_execution(weights, data_x, cdf_fn, dask_client=dask_client))
+        return {"y_predict_cdf": np.array(preds)}
+
+    circuit_fn = kwargs["circuit_fn"]
+    device = kwargs.get("torch_device", "cpu")
+    w_t = _weights_to_tensor(weights, device)
+    data_x_arr = np.asarray(data_x)
+    if data_x_arr.ndim == 1:
+        data_x_arr = data_x_arr.reshape(-1, 1)
+    x_batch = torch.tensor(data_x_arr, dtype=torch.float64, device=torch.device(device))
+    with torch.no_grad():
+        preds = _vmap(circuit_fn, in_dims=(None, 0))(w_t, x_batch).detach().cpu().numpy().reshape(-1)
+    return {"y_predict_cdf": preds}
 
 
 def workflow_for_pdf(
     weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, dask_client: Optional[Any] = None, **kwargs: Any
 ):
     """
-    Compute PDF predictions for a dataset.
+    Compute PDF predictions for a dataset (batched via qml.vmap).
 
     Returns
     -------
     dict with key 'y_predict_pdf' : np.array shape (N,)
     """
-
-    def pdf_fn(w, x):
-        return pdf_workflow(w, x, **kwargs)
-
-    preds = workflow_execution(weights, data_x, pdf_fn, dask_client=dask_client)
     if dask_client is not None:
-        preds = dask_client.gather(preds)
-    return {"y_predict_pdf": np.array(preds)}
+        def pdf_fn(w, x):
+            return pdf_workflow(w, x, **kwargs)
+        preds = dask_client.gather(workflow_execution(weights, data_x, pdf_fn, dask_client=dask_client))
+        return {"y_predict_pdf": np.array(preds)}
+
+    circuit_fn = kwargs["circuit_fn"]
+    device = kwargs.get("torch_device", "cpu")
+    w_t = _weights_to_tensor(weights, device)
+    if isinstance(w_t, torch.Tensor) and w_t.requires_grad:
+        w_t = w_t.detach()
+    data_x_arr = np.asarray(data_x)
+    if data_x_arr.ndim == 1:
+        data_x_arr = data_x_arr.reshape(-1, 1)
+    x_batch = torch.tensor(data_x_arr, dtype=torch.float64, device=torch.device(device), requires_grad=True)
+    cdf_batch = _vmap(circuit_fn, in_dims=(None, 0))(w_t, x_batch)
+    pdf_grads = torch.autograd.grad(cdf_batch.sum(), x_batch)[0]  # (N, n_features)
+    preds = pdf_grads.sum(dim=1).detach().cpu().numpy().reshape(-1)
+    return {"y_predict_pdf": preds}
 
 
 # ---------------------------------------------------------------------------
@@ -205,41 +225,33 @@ def _qdml_loss_torch(
 
     alpha_0, alpha_1 = float(loss_weights[0]), float(loss_weights[1])
 
-    # --- CDF predictions ---
-    cdf_list = []
-    for x_i in data_x_arr:
-        x_t = torch.tensor(x_i, dtype=torch.float64, device=torch_device)
-        cdf_list.append(circuit_fn(weights_t, x_t))
-    cdf_preds = torch.stack(cdf_list).reshape(-1, 1)
+    # Batched circuit: evaluates all samples in one GPU call instead of a Python loop.
+    # grad(sum_i CDF(w, x_i), x)[i] = dCDF(w,x_i)/dx_i  (samples are independent).
+    batched_circuit = _vmap(circuit_fn, in_dims=(None, 0))
+
+    # --- CDF predictions (batched, no x-gradient needed) ---
+    x_cdf = torch.tensor(data_x_arr, dtype=torch.float64, device=torch_device)
+    cdf_preds = batched_circuit(weights_t, x_cdf).reshape(-1, 1)
 
     labels_t = torch.tensor(np.asarray(data_y).reshape(-1, 1), dtype=torch.float64, device=torch_device)
     loss_cdf = torch.mean((cdf_preds - labels_t) ** 2)
 
-    # --- PDF predictions (d(CDF)/dx, needs create_graph for outer backward) ---
-    pdf_list = []
-    for x_i in data_x_arr:
-        x_t = torch.tensor(x_i, dtype=torch.float64, device=torch_device, requires_grad=True)
-        cdf_i = circuit_fn(weights_t, x_t)
-        pdf_i = torch.autograd.grad(cdf_i, x_t, create_graph=create_graph)[0]
-        pdf_list.append(pdf_i.sum())
-    pdf_preds = torch.stack(pdf_list).reshape(-1, 1)
+    # --- PDF predictions: d(CDF)/dx for each training sample (batched) ---
+    x_pdf = torch.tensor(data_x_arr, dtype=torch.float64, device=torch_device, requires_grad=True)
+    cdf_for_pdf = batched_circuit(weights_t, x_pdf)  # (N,)
+    pdf_grads = torch.autograd.grad(cdf_for_pdf.sum(), x_pdf, create_graph=create_graph)[0]  # (N, n_features)
+    mean_pdf = pdf_grads.sum(dim=1).mean()
 
-    mean_pdf = torch.mean(pdf_preds)
-
-    # --- Integral of PDF² over the domain ---
+    # --- Integral of PDF² over the domain (batched) ---
     x_integral = np.linspace(
         np.asarray(minval).reshape(-1), np.asarray(maxval).reshape(-1), int(points)
     )  # shape (points, n_features)
     domain_x = np.array(list(product(*[x_integral[:, i] for i in range(x_integral.shape[1])])))
 
-    pdf_sq_list = []
-    for x_i in domain_x:
-        x_t = torch.tensor(x_i, dtype=torch.float64, device=torch_device, requires_grad=True)
-        cdf_i = circuit_fn(weights_t, x_t)
-        pdf_i = torch.autograd.grad(cdf_i, x_t, create_graph=create_graph)[0]
-        pdf_sq_list.append((pdf_i.sum()) ** 2)
-
-    pdf_sq_tensor = torch.stack(pdf_sq_list)
+    x_int = torch.tensor(domain_x, dtype=torch.float64, device=torch_device, requires_grad=True)
+    cdf_int = batched_circuit(weights_t, x_int)  # (M,)
+    pdf_int_grads = torch.autograd.grad(cdf_int.sum(), x_int, create_graph=create_graph)[0]  # (M, n_features)
+    pdf_sq_tensor = pdf_int_grads.sum(dim=1) ** 2  # (M,)
 
     if domain_x.shape[1] == 1:
         x_dom_t = torch.tensor(domain_x[:, 0], dtype=torch.float64, device=torch_device)
