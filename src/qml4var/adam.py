@@ -164,6 +164,12 @@ def adam_optimizer_loop(
         Default: True (or env var QML4VAR_PROFILE_ONCE)
     profile_label : kwargs, str
         Optional label shown in profile lines.
+    checkpoint_fn : kwargs, callable, optional
+        ``checkpoint_fn(weights, epoch, train_loss, test_mse)`` called every
+        *checkpoint_step* epochs and at epoch 0.  Build it with
+        :func:`qml4var.results.make_checkpoint_fn`.
+    checkpoint_step : kwargs, int, optional
+        How often (in epochs) to call *checkpoint_fn*.  Default: 50.
     """
     # Get Weights
     weights = list(weights_dict.values())
@@ -177,6 +183,9 @@ def adam_optimizer_loop(
 
     # Deal with save Folder
     file_to_save = kwargs.get("file_to_save")
+    # Checkpoint callback
+    checkpoint_fn = kwargs.get("checkpoint_fn")
+    checkpoint_step = int(kwargs.get("checkpoint_step", 50))
     # Configure Stop
     epochs = kwargs.get("epochs")
     tolerance = kwargs.get("tolerance")
@@ -220,6 +229,8 @@ def adam_optimizer_loop(
         print("Loss Function at t={}: {}".format(t_, loss_0))
         print("MSE at t={}: {}".format(t_, metric_mse_0))
         save_stuff(weights, weights_names, t_, loss_0, metric_mse_0, file_to_save)
+        if checkpoint_fn is not None:
+            checkpoint_fn(weights, t_, loss_0, metric_mse_0)
 
     converged = False
     start_t = t_
@@ -262,6 +273,11 @@ def adam_optimizer_loop(
             print("\t MSE at t={}: {}".format(t_, metric_mse_t))
             print("\t Iteracion: {}. Loss: {}".format(t_, loss_t))
             save_stuff(weights, weights_names, t_, loss_0, metric_mse_t, file_to_save)
+        if checkpoint_fn is not None and t_ % checkpoint_step == 0:
+            metric_for_ckpt = metric_mse_t if t_ % print_step == 0 else (
+                None if metric_function is None else metric_function(weights)
+            )
+            checkpoint_fn(weights, t_, loss_t, metric_for_ckpt)
 
         if pbar is not None:
             pbar.update(1)
