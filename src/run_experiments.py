@@ -173,7 +173,7 @@ def run_single(
         features_number=1,
         n_qubits_by_feature=n_qubits,
         n_layers=n_layers,
-        base_frecuency=[0.5],  # maps [-pi, pi] → [-pi/2, pi/2] for RY encoding
+        base_frecuency=[0.5],  # maps [-pi, pi] → [-pi/2, pi/2] for RX encoding
         shift_feature=[0.0],
         torch_device=device,
     )

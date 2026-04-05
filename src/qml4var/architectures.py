@@ -14,8 +14,8 @@ def hardware_efficient_ansatz(**kwargs: Any):
     Create a hardware efficient ansatz as a PennyLane QNode.
 
     The circuit applies, for each layer:
-      1. RX(weight) on each qubit
-      2. RY(normalized_feature) on each qubit
+      1. RX(normalized_feature) on each qubit  — data encoding
+      2. RY(weight) on each qubit              — variational block
       3. CNOT entanglement chain (circular)
 
     Feature normalization (base_frecuency * x + shift_feature) is applied
@@ -94,10 +94,10 @@ def hardware_efficient_ansatz(**kwargs: Any):
                 base_w = layer_ * features_number * n_qubits_by_feature + input_ * n_qubits_by_feature
                 for qubit_ in range(n_qubits_by_feature):
                     actual_qubit = input_ * n_qubits_by_feature + qubit_
-                    qml.RX(weights[base_w + qubit_], wires=actual_qubit)
+                    qml.RX(norm_features[input_], wires=actual_qubit)
                 for qubit_ in range(n_qubits_by_feature):
                     actual_qubit = input_ * n_qubits_by_feature + qubit_
-                    qml.RY(norm_features[input_], wires=actual_qubit)
+                    qml.RY(weights[base_w + qubit_], wires=actual_qubit)
 
             # Circular entanglement layer
             for qubit_ in range(n_qubits - 1):
@@ -125,9 +125,9 @@ def normalize_data(min_value: list, max_value: list, min_x: Optional[list] = Non
     max_value : list
         Maximum value for all features.
     min_x : list, optional
-        Minimum encoding value (rotation angle). Default: -pi/2.
+        Minimum encoding value (rotation angle). Default: -pi.
     max_x : list, optional
-        Maximum encoding value (rotation angle). Default: -pi/2.
+        Maximum encoding value (rotation angle). Default: +pi.
 
     Returns
     -------
@@ -136,8 +136,8 @@ def normalize_data(min_value: list, max_value: list, min_x: Optional[list] = Non
     """
     max_value_ = np.array(max_value)
     min_value_ = np.array(min_value)
-    min_x = np.array([-0.5 * np.pi]) if min_x is None else np.array(min_x)
-    max_x = np.array([-0.5 * np.pi]) if max_x is None else np.array(max_x)
+    min_x = np.array([-np.pi]) if min_x is None else np.array(min_x)
+    max_x = np.array([+np.pi]) if max_x is None else np.array(max_x)
     slope = (max_x - min_x) / (max_value_ - min_value_)
     b0 = min_x - slope * min_value_
     return slope, b0
