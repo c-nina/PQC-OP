@@ -40,8 +40,8 @@ from qml4var.data_utils import (
     inverse_rescaling_u_to_xt,
     simulate_black_scholes_data_rescaled,
 )
-from qml4var.losses import torch_gradient
-from qml4var.workflows import qdml_loss_workflow, mse_workflow
+from qml4var.losses import torch_gradient, qdml_loss_workflow
+from qml4var.workflows import mse_workflow
 from qml4var.adam import adam_optimizer_loop
 from finance import bs_put_price, estimate_price_from_trained_pqc, estimate_price_ibp
 

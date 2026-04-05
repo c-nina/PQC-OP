@@ -11,8 +11,8 @@ import pandas as pd
 from qml4var.adam import adam_optimizer_loop
 from qml4var.architectures import hardware_efficient_ansatz, z_observable
 from qml4var.data_utils import get_dataset
-from qml4var.losses import numeric_gradient
-from qml4var.workflows import mse_workflow, qdml_loss_workflow
+from qml4var.losses import numeric_gradient, qdml_loss_workflow
+from qml4var.workflows import mse_workflow
 
 
 def batch_generator(X: np.ndarray, Y: np.ndarray, batch_size: int):

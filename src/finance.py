@@ -439,52 +439,6 @@ def fourier_price_v_t0(
 
 
 # ---------------------------------------------------------------------------
-# Loss functions (device-independent, unchanged)
-# ---------------------------------------------------------------------------
-
-
-def loss_function_pdf_and_derivative(
-    labels_pdf: np.ndarray,
-    predict_pdf: np.ndarray,
-    predict_pdf_derivative: np.ndarray,
-    labels_pdf_derivative: Optional[np.ndarray] = None,
-    integral_pdf_sq: float = 0.0,
-    loss_weights: tuple = (0.9, 0.1, 0.0),
-):
-    """
-    L = alpha_pdf * E_pdf + alpha_derivative * E_der + alpha_integral * I
-    """
-    if predict_pdf.shape != labels_pdf.shape:
-        raise ValueError("predict_pdf and labels_pdf have different shape")
-
-    pdf_error = np.mean((predict_pdf - labels_pdf) ** 2)
-
-    if labels_pdf_derivative is None:
-        derivative_error = np.mean(predict_pdf_derivative**2)
-    else:
-        if predict_pdf_derivative.shape != labels_pdf_derivative.shape:
-            raise ValueError("predict_pdf_derivative and labels_pdf_derivative have different shape")
-        derivative_error = np.mean((predict_pdf_derivative - labels_pdf_derivative) ** 2)
-
-    alpha_pdf, alpha_derivative, alpha_integral = loss_weights
-    return alpha_pdf * pdf_error + alpha_derivative * derivative_error + alpha_integral * float(integral_pdf_sq)
-
-
-def loss_function_qdml(labels: np.ndarray, predict_cdf: np.ndarray, predict_pdf: np.ndarray, integral: float):
-    """Legacy QDML loss (numpy, for reference)."""
-    alpha_0 = 0
-    alpha_1 = 0.5
-    if predict_cdf.shape != labels.shape:
-        raise ValueError("predict_cdf and labels have different shape!!")
-    error_ = predict_cdf - labels
-    loss_1 = np.mean(error_**2)
-    if predict_pdf.shape != labels.shape:
-        raise ValueError("predict_pdf and labels have different shape!!")
-    mean = -2 * np.mean(predict_pdf)
-    return alpha_0 * loss_1 + alpha_1 * (mean + integral)
-
-
-# ---------------------------------------------------------------------------
 # Black-Scholes analytical pricing
 # ---------------------------------------------------------------------------
 

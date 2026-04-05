@@ -173,6 +173,63 @@ def simulate_black_scholes_data_rescaled(
     return x_t.reshape(-1, 1), u_t.reshape(-1, 1), x_min_raw, x_max_raw
 
 
+def generate_method_I_labels(
+    xs_rescaled: np.ndarray,
+    mu: float,
+    sigma: float,
+    a: float,
+    b: float,
+) -> tuple:
+    """
+    Generate analytical PDF labels and their derivatives for Method I (paper Sec. 3.2.1).
+
+    The PQC is trained in [-2π, 2π] with data rescaled to [-π, π]. This function
+    computes the PDF and its derivative in the rescaled space given the corresponding
+    Normal distribution parameters in the original log-moneyness space.
+
+    Parameters
+    ----------
+    xs_rescaled : np.ndarray, shape (I,) or (I, 1)
+        Training points in rescaled space [-2π, 2π].
+    mu : float
+        Mean of the Normal distribution in log-moneyness space.
+        For Black-Scholes: mu = log(S0/K) + (r - σ²/2) * T
+    sigma : float
+        Std dev of the Normal distribution.
+        For Black-Scholes: sigma = σ_BS * sqrt(T)
+    a : float
+        Left bound of the truncation interval in original log-moneyness space.
+    b : float
+        Right bound of the truncation interval.
+
+    Returns
+    -------
+    pdf_vals : np.ndarray, shape (I,)
+        f*(xs) in the rescaled space (accounts for change-of-variables Jacobian).
+    pdf_deriv : np.ndarray, shape (I,)
+        df*/du(xs) in the rescaled space.
+    """
+    from scipy.stats import norm
+
+    xs = np.asarray(xs_rescaled).reshape(-1)
+
+    # Inverse map: rescaled u ∈ [-2π, 2π] → original x ∈ [a, b]
+    # u = 4π * (x - a) / (b - a) - 2π  →  x = (u + 2π)(b - a)/(4π) + a
+    scale = (b - a) / (4.0 * np.pi)
+    xs_original = xs * scale + (a + b) / 2.0
+
+    # PDF and its derivative in original space
+    pdf_original = norm.pdf(xs_original, loc=mu, scale=sigma)
+    dpdf_original = -((xs_original - mu) / sigma ** 2) * pdf_original
+
+    # Change of variables: f_rescaled(u) = f_original(x(u)) * |dx/du| = f_original * scale
+    pdf_vals = pdf_original * scale
+    # d(f_rescaled)/du = d(f_original)/dx * (dx/du)² = dpdf_original * scale²
+    pdf_deriv = dpdf_original * scale ** 2
+
+    return pdf_vals, pdf_deriv
+
+
 def inverse_rescaling_u_to_xt(
     u_values,
     x_min_raw: float,

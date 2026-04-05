@@ -13,13 +13,11 @@ import torch
 
 from qml4var.architectures import hardware_efficient_ansatz, init_weights, normalize_data
 from qml4var.data_utils import bs_cdf, empirical_cdf
-from qml4var.losses import mse, torch_gradient
+from qml4var.losses import mse, torch_gradient, qdml_loss_workflow, unsupervised_qdml_loss_workflow
 from qml4var.workflows import (
     cdf_workflow,
     dft_from_trained_pqc,
     pdf_workflow,
-    qdml_loss_workflow,
-    unsupervised_qdml_loss_workflow,
     workflow_for_cdf,
 )
 

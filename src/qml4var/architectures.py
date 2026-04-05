@@ -13,10 +13,13 @@ def hardware_efficient_ansatz(**kwargs: Any):
     """
     Create a hardware efficient ansatz as a PennyLane QNode.
 
-    The circuit applies, for each layer:
-      1. RX(normalized_feature) on each qubit  — data encoding
-      2. RY(weight) on each qubit              — variational block
+    Structure per layer (paper Fig. 4, eq. 2):
+      1. RX(normalized_feature) on each qubit  — data encoding S_H(x)
+      2. RY(weight) on each qubit              — variational block W
       3. CNOT entanglement chain (circular)
+
+    A final variational block W^{L+1} (RY, no encoding) is applied after the
+    last layer, matching the leftmost W in eq. (2) of the paper.
 
     Feature normalization (base_frecuency * x + shift_feature) is applied
     inside the circuit so callers pass raw feature values.
@@ -61,6 +64,10 @@ def hardware_efficient_ansatz(**kwargs: Any):
         for input_ in range(features_number):
             for qubit_ in range(n_qubits_by_feature):
                 weights_names.append("weights_{}_{}_{}".format(layer_, input_, qubit_))
+    # Final variational layer W^{L+1} (no encoding after it)
+    for input_ in range(features_number):
+        for qubit_ in range(n_qubits_by_feature):
+            weights_names.append("weights_final_{}_{}".format(input_, qubit_))
 
     # Capture normalization constants as tensors
     bf = torch.tensor(base_frecuency, dtype=torch.float64)
@@ -83,7 +90,7 @@ def hardware_efficient_ansatz(**kwargs: Any):
         """
         Parameters
         ----------
-        weights : torch.Tensor, shape (n_layers * features_number * n_qubits_by_feature,)
+        weights : torch.Tensor, shape ((n_layers + 1) * features_number * n_qubits_by_feature,)
         raw_features : torch.Tensor, shape (features_number,)
         """
         # Apply feature normalization inside the circuit (same as old QLM parametric expr)
@@ -104,6 +111,13 @@ def hardware_efficient_ansatz(**kwargs: Any):
                 qml.CNOT(wires=[qubit_, qubit_ + 1])
             if n_qubits > 1:
                 qml.CNOT(wires=[n_qubits - 1, 0])
+
+        # Final variational block W^{L+1} — no encoding (paper eq. 2)
+        final_base = n_layers * features_number * n_qubits_by_feature
+        for input_ in range(features_number):
+            for qubit_ in range(n_qubits_by_feature):
+                actual_qubit = input_ * n_qubits_by_feature + qubit_
+                qml.RY(weights[final_base + input_ * n_qubits_by_feature + qubit_], wires=actual_qubit)
 
         # Z⊗Z⊗...⊗Z observable
         obs = qml.PauliZ(0)

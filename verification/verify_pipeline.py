@@ -41,8 +41,8 @@ import matplotlib.pyplot as plt
 
 from qml4var.architectures import hardware_efficient_ansatz, init_weights
 from qml4var.adam import adam_optimizer_loop, update_parameters_with_adam
-from qml4var.losses import torch_gradient
-from qml4var.workflows import workflow_for_cdf, qdml_loss_workflow, mse_workflow
+from qml4var.losses import torch_gradient, qdml_loss_workflow
+from qml4var.workflows import workflow_for_cdf, mse_workflow
 from qml4var.data_utils import (
     bs_cdf,
     empirical_cdf,

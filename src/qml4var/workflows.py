@@ -9,14 +9,12 @@ All public functions preserve their original signatures so that existing
 notebook code requires minimal changes (only the workflow_cfg dict changes).
 """
 
-from itertools import product
 from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import torch
 from torch.func import vmap as _vmap
 
-from qml4var.data_utils import empirical_cdf
 from qml4var.losses import mse
 
 # ---------------------------------------------------------------------------
@@ -30,13 +28,6 @@ def _weights_to_tensor(weights: Union[list, dict, torch.Tensor], device: str):
         return weights
     values = list(weights.values()) if isinstance(weights, dict) else list(weights)
     return torch.tensor(values, dtype=torch.float64, device=torch.device(device))
-
-
-def _trapz_torch(y_tensor: torch.Tensor, x_tensor: torch.Tensor):
-    """Trapezoidal integration on torch tensors (differentiable)."""
-    if hasattr(torch, "trapezoid"):
-        return torch.trapezoid(y_tensor, x_tensor)
-    return torch.trapz(y_tensor, x_tensor)
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +64,7 @@ def cdf_workflow(weights: Union[list, dict, torch.Tensor], x_sample: np.ndarray,
     x_t = torch.tensor(x_flat, dtype=torch.float64, device=torch.device(device))
 
     with torch.no_grad():
-        result = circuit_fn(w_t, x_t)
+        result = (circuit_fn(w_t, x_t) + 1.0) / 2.0  # map [-1,1] → [0,1]
     return result.item()
 
 
@@ -99,7 +90,7 @@ def pdf_workflow(weights: Union[list, dict, torch.Tensor], x_sample: np.ndarray,
 
     x_flat = np.asarray(x_sample).reshape(-1)
     x_t = torch.tensor(x_flat, dtype=torch.float64, device=torch.device(device), requires_grad=True)
-    cdf = circuit_fn(w_t, x_t)
+    cdf = (circuit_fn(w_t, x_t) + 1.0) / 2.0  # map [-1,1] → [0,1]; PDF = 0.5 * d(circuit)/dx
     cdf.backward()
     return x_t.grad.sum().item()
 
@@ -155,7 +146,8 @@ def workflow_for_cdf(
         data_x_arr = data_x_arr.reshape(-1, 1)
     x_batch = torch.tensor(data_x_arr, dtype=torch.float64, device=torch.device(device))
     with torch.no_grad():
-        preds = _vmap(circuit_fn, in_dims=(None, 0))(w_t, x_batch).detach().cpu().numpy().reshape(-1)
+        raw = _vmap(circuit_fn, in_dims=(None, 0))(w_t, x_batch)
+        preds = ((raw + 1.0) / 2.0).detach().cpu().numpy().reshape(-1)  # map [-1,1] → [0,1]
     return {"y_predict_cdf": preds}
 
 
@@ -184,154 +176,10 @@ def workflow_for_pdf(
     if data_x_arr.ndim == 1:
         data_x_arr = data_x_arr.reshape(-1, 1)
     x_batch = torch.tensor(data_x_arr, dtype=torch.float64, device=torch.device(device), requires_grad=True)
-    cdf_batch = _vmap(circuit_fn, in_dims=(None, 0))(w_t, x_batch)
-    pdf_grads = torch.autograd.grad(cdf_batch.sum(), x_batch)[0]  # (N, n_features)
+    cdf_batch = (_vmap(circuit_fn, in_dims=(None, 0))(w_t, x_batch) + 1.0) / 2.0  # map to [0,1]
+    pdf_grads = torch.autograd.grad(cdf_batch.sum(), x_batch)[0]  # (N, n_features), = 0.5*d(circuit)/dx
     preds = pdf_grads.sum(dim=1).detach().cpu().numpy().reshape(-1)
     return {"y_predict_pdf": preds}
-
-
-# ---------------------------------------------------------------------------
-# Differentiable loss (used by torch_gradient)
-# ---------------------------------------------------------------------------
-
-
-def _qdml_loss_torch(
-    weights_t: torch.Tensor,
-    data_x: np.ndarray,
-    data_y: np.ndarray,
-    circuit_fn: Callable,
-    device: str,
-    loss_weights: list,
-    minval: Union[float, list],
-    maxval: Union[float, list],
-    points: int,
-    create_graph: bool = False,
-):
-    """
-    Compute QDML loss as a torch scalar.
-
-    Parameters
-    ----------
-    create_graph : bool
-        If True, build the second-order computation graph so that the outer
-        backward pass (d(loss)/d(weights_t)) propagates through the PDF term.
-        Set to True only when weights_t.requires_grad=True (training gradient).
-        Set to False for monitoring evaluations.
-    """
-    torch_device = torch.device(device)
-    data_x_arr = np.asarray(data_x)
-    if data_x_arr.ndim == 1:
-        data_x_arr = data_x_arr.reshape(-1, 1)
-
-    alpha_0, alpha_1 = float(loss_weights[0]), float(loss_weights[1])
-
-    # Batched circuit: evaluates all samples in one GPU call instead of a Python loop.
-    # grad(sum_i CDF(w, x_i), x)[i] = dCDF(w,x_i)/dx_i  (samples are independent).
-    batched_circuit = _vmap(circuit_fn, in_dims=(None, 0))
-
-    # --- CDF predictions (batched, no x-gradient needed) ---
-    x_cdf = torch.tensor(data_x_arr, dtype=torch.float64, device=torch_device)
-    cdf_preds = batched_circuit(weights_t, x_cdf).reshape(-1, 1)
-
-    labels_t = torch.tensor(np.asarray(data_y).reshape(-1, 1), dtype=torch.float64, device=torch_device)
-    loss_cdf = torch.mean((cdf_preds - labels_t) ** 2)
-
-    # --- PDF predictions: d(CDF)/dx for each training sample (batched) ---
-    x_pdf = torch.tensor(data_x_arr, dtype=torch.float64, device=torch_device, requires_grad=True)
-    cdf_for_pdf = batched_circuit(weights_t, x_pdf)  # (N,)
-    pdf_grads = torch.autograd.grad(cdf_for_pdf.sum(), x_pdf, create_graph=create_graph)[0]  # (N, n_features)
-    mean_pdf = pdf_grads.sum(dim=1).mean()
-
-    # --- Integral of PDF² over the domain (batched) ---
-    x_integral = np.linspace(
-        np.asarray(minval).reshape(-1), np.asarray(maxval).reshape(-1), int(points)
-    )  # shape (points, n_features)
-    domain_x = np.array(list(product(*[x_integral[:, i] for i in range(x_integral.shape[1])])))
-
-    x_int = torch.tensor(domain_x, dtype=torch.float64, device=torch_device, requires_grad=True)
-    cdf_int = batched_circuit(weights_t, x_int)  # (M,)
-    pdf_int_grads = torch.autograd.grad(cdf_int.sum(), x_int, create_graph=create_graph)[0]  # (M, n_features)
-    pdf_sq_tensor = pdf_int_grads.sum(dim=1) ** 2  # (M,)
-
-    if domain_x.shape[1] == 1:
-        x_dom_t = torch.tensor(domain_x[:, 0], dtype=torch.float64, device=torch_device)
-        integral = _trapz_torch(pdf_sq_tensor, x_dom_t)
-    else:
-        # Monte Carlo for higher dimensions
-        factor = float(np.prod(domain_x.max(axis=0) - domain_x.min(axis=0)) / domain_x.shape[0])
-        integral = pdf_sq_tensor.sum() * factor
-
-    return alpha_0 * loss_cdf + alpha_1 * (-2.0 * mean_pdf + integral)
-
-
-# ---------------------------------------------------------------------------
-# High-level workflow functions (same API as before)
-# ---------------------------------------------------------------------------
-
-
-def qdml_loss_workflow(
-    weights: Union[list, dict, torch.Tensor],
-    data_x: np.ndarray,
-    data_y: np.ndarray,
-    dask_client: Optional[Any] = None,
-    **kwargs: Any,
-):
-    """
-    Compute QDML loss.
-
-    When weights is a torch.Tensor with requires_grad=True (called from
-    torch_gradient), returns a differentiable scalar.
-    Otherwise, returns a plain float for monitoring.
-
-    Parameters
-    ----------
-    weights : list, dict, or torch.Tensor
-    data_x : np.array
-    data_y : np.array
-    dask_client : ignored (kept for API compatibility)
-    kwargs : must contain circuit_fn, torch_device, loss_weights,
-             minval, maxval, points.
-    """
-    circuit_fn = kwargs["circuit_fn"]
-    device = kwargs.get("torch_device", "cpu")
-    loss_weights = kwargs.get("loss_weights", [1.0, 5.0])
-    minval = kwargs.get("minval")
-    maxval = kwargs.get("maxval")
-    points = kwargs.get("points")
-
-    if isinstance(weights, torch.Tensor):
-        # Called from torch_gradient: need create_graph=True for PDF term
-        return _qdml_loss_torch(
-            weights, data_x, data_y, circuit_fn, device, loss_weights, minval, maxval, points, create_graph=True
-        )
-    # Called for monitoring: create_graph=False, return plain float
-    weights_t = _weights_to_tensor(weights, device)
-    return _qdml_loss_torch(
-        weights_t, data_x, data_y, circuit_fn, device, loss_weights, minval, maxval, points, create_graph=False
-    ).item()
-
-
-def unsupervised_qdml_loss_workflow(
-    weights: Union[list, dict, torch.Tensor],
-    data_x: np.ndarray,
-    dask_client: Optional[Any] = None,
-    empirical_shift: float = -0.5,
-    **kwargs: Any,
-):
-    """
-    Unsupervised QDML loss: labels built from empirical CDF of data_x.
-
-    Parameters
-    ----------
-    Same as qdml_loss_workflow, minus data_y.
-    empirical_shift : float
-        Constant shift added to empirical CDF labels. Default -0.5.
-    """
-    data_x = np.asarray(data_x)
-    if data_x.ndim == 1:
-        data_x = data_x.reshape(-1, 1)
-    data_y = empirical_cdf(data_x).reshape(-1, 1) + empirical_shift
-    return qdml_loss_workflow(weights, data_x, data_y, dask_client=dask_client, **kwargs)
 
 
 def mse_workflow(
