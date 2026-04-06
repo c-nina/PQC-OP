@@ -520,7 +520,7 @@ def estimate_price_from_trained_pqc(
     float : estimated put option price, or np.nan on failure
     """
     from qml4var.data_utils import inverse_rescaling_u_to_xt
-    from qml4var.workflows import workflow_for_pdf
+    from qml4var.workflows import workflow_for_pdf_direct
 
     trapz_fn = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
 
@@ -528,7 +528,7 @@ def estimate_price_from_trained_pqc(
     a, b = train_interval
     u_grid = np.linspace(a, b, grid_points).reshape(-1, 1)
 
-    pdf_raw = workflow_for_pdf(weights, u_grid, dask_client=dask_client, **workflow_cfg)["y_predict_pdf"].reshape(-1)
+    pdf_raw = workflow_for_pdf_direct(weights, u_grid, dask_client=dask_client, **workflow_cfg)["y_predict_pdf"].reshape(-1)
     pdf_pred = np.nan_to_num(pdf_raw, nan=0.0, posinf=0.0, neginf=0.0)
     pdf_pred = np.clip(pdf_pred, 0.0, None)
 
@@ -646,7 +646,7 @@ def estimate_price_ibp(
     u_flat = u_inner[:, 0]
 
     cdf_raw = workflow_for_cdf(weights, u_inner, dask_client=dask_client, **workflow_cfg)["y_predict_cdf"].reshape(-1)
-    cdf_inner = np.clip(cdf_raw + 0.5, 0.0, 1.0)
+    cdf_inner = np.clip(cdf_raw, 0.0, 1.0)  # workflow_for_cdf already maps to [0,1]
 
     F_at_a = float(cdf_inner[0])
     F_at_b = float(cdf_inner[-1])

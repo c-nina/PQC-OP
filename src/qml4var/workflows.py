@@ -182,6 +182,34 @@ def workflow_for_pdf(
     return {"y_predict_pdf": preds}
 
 
+def workflow_for_pdf_direct(
+    weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, dask_client: Optional[Any] = None, **kwargs: Any
+):
+    """
+    Return the raw circuit output as the PDF prediction (Method I real, paper Sec. 3.2.1).
+
+    Unlike workflow_for_pdf (which differentiates the CDF mapping to get the PDF),
+    this function returns the circuit output directly — no (output+1)/2 mapping and
+    no derivative w.r.t. the input. The circuit is trained with method_I_h1_loss
+    to approximate the PDF directly, so its output IS the PDF.
+
+    Returns
+    -------
+    dict with key 'y_predict_pdf' : np.array shape (N,), values in [-1, 1]
+    """
+    circuit_fn = kwargs["circuit_fn"]
+    device = kwargs.get("torch_device", "cpu")
+    w_t = _weights_to_tensor(weights, device)
+    data_x_arr = np.asarray(data_x)
+    if data_x_arr.ndim == 1:
+        data_x_arr = data_x_arr.reshape(-1, 1)
+    x_batch = torch.tensor(data_x_arr, dtype=torch.float64, device=torch.device(device))
+    with torch.no_grad():
+        raw = _vmap(circuit_fn, in_dims=(None, 0))(w_t, x_batch)
+        preds = raw.detach().cpu().numpy().reshape(-1)
+    return {"y_predict_pdf": preds}
+
+
 def mse_workflow(
     weights: Union[list, dict, torch.Tensor],
     data_x: np.ndarray,

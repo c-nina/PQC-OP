@@ -230,6 +230,57 @@ def generate_method_I_labels(
     return pdf_vals, pdf_deriv
 
 
+def generate_method_I_data(
+    S0: float,
+    K: float,
+    r: float,
+    T: float,
+    sigma: float,
+    n_points: int,
+) -> tuple:
+    """
+    Generate Method I real dataset with analytical bounds and PDF labels (paper Sec. 3.2.1).
+
+    Unlike `simulate_black_scholes_data_rescaled`, this uses analytical bounds
+    (mu ± 3*sigma_T) so they are fixed and reproducible regardless of seed.
+    The training grid is a uniform grid in [-π, π] (not random samples).
+
+    Parameters
+    ----------
+    S0, K, r, T, sigma : Black-Scholes parameters
+    n_points            : number of grid points
+
+    Returns
+    -------
+    grid          : np.ndarray, shape (n_points, 1), uniform grid in [-π, π]
+    pdf_vals      : np.ndarray, shape (n_points,), PDF in rescaled space
+    pdf_deriv     : np.ndarray, shape (n_points,), d(PDF)/du in rescaled space
+    a             : float, left bound in log-moneyness space
+    b             : float, right bound in log-moneyness space
+    """
+    # Analytical BS parameters for log(S_T/K) ~ N(mu, sigma_T^2)
+    mu = np.log(S0 / K) + (r - 0.5 * sigma**2) * T
+    sigma_T = sigma * np.sqrt(T)
+
+    # Analytical bounds covering >99.7% of the distribution (paper Sec. 3.1.1)
+    a = mu - 3.0 * sigma_T
+    b = mu + 3.0 * sigma_T
+
+    # Uniform grid in [-π, π] (training domain)
+    grid = np.linspace(-np.pi, np.pi, n_points)
+
+    # generate_method_I_labels expects xs_rescaled in [-2π, 2π].
+    # Passing 2*grid (in [-2π, 2π]) ensures the inverse map xs_original ∈ [a, b].
+    # The returned densities are in [-2π, 2π] space; we convert to [-π, π] space:
+    #   f_{[-π,π]}(u) = f_{[-2π,2π]}(2u) * 2     (factor from d(2u)/du = 2)
+    #   df_{[-π,π]}/du = df_{[-2π,2π]}/dv * 4     (factor from chain rule: 2² = 4)
+    pdf_vals_2pi, pdf_deriv_2pi = generate_method_I_labels(2.0 * grid, mu, sigma_T, a, b)
+    pdf_vals = pdf_vals_2pi * 2.0
+    pdf_deriv = pdf_deriv_2pi * 4.0
+
+    return grid.reshape(-1, 1), pdf_vals, pdf_deriv, a, b
+
+
 def inverse_rescaling_u_to_xt(
     u_values,
     x_min_raw: float,

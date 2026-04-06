@@ -33,15 +33,18 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+import torch
+
 from qml4var.architectures import hardware_efficient_ansatz, init_weights
 from qml4var.data_utils import (
     bs_cdf,
     empirical_cdf,
+    generate_method_I_data,
     inverse_rescaling_u_to_xt,
     simulate_black_scholes_data_rescaled,
 )
-from qml4var.losses import torch_gradient, qdml_loss_workflow
-from qml4var.workflows import mse_workflow
+from qml4var.losses import method_I_h1_loss, torch_gradient, qdml_loss_workflow
+from qml4var.workflows import mse_workflow, workflow_for_pdf_direct
 from qml4var.adam import adam_optimizer_loop
 from finance import bs_put_price, estimate_price_from_trained_pqc, estimate_price_ibp
 
@@ -69,10 +72,11 @@ METHOD_CONFIGS: dict[int, dict] = {
         "datasets": [250, 500, 1000, 2500],
         "architectures": [(6, 6), (7, 7), (8, 8)],  # (n_qubits, n_layers)
         "lr": 0.005,
-        "alpha_0": 0.9,  # supervised CDF-MSE weight
-        "alpha_1": 0.1,  # differential PDF-norm weight
+        "alpha_0": 0.9,  # H¹ PDF-value weight (paper Table 1)
+        "alpha_1": 0.1,  # H¹ PDF-derivative weight (paper Table 1)
         "n_test": 100,
         "pricing": "pdf_fourier",
+        "use_real_method_I": True,  # train on analytical PDF labels (paper Sec. 3.2.1)
     },
     2: {
         "name": "method_II",
@@ -116,22 +120,19 @@ def _build_dataset(K: float, n_data: int, n_test: int, seed: int):
         seed=seed,
     )
     train_x = u_t  # (n_data, 1)
-    train_y = empirical_cdf(u_t).reshape(-1, 1) - 0.5  # (n_data, 1)
+    train_y = empirical_cdf(u_t).reshape(-1, 1)  # (n_data, 1) in [0, 1]
 
     u_test = np.linspace(-np.pi, np.pi, n_test).reshape(-1, 1)
     x_raw_test = inverse_rescaling_u_to_xt(u_test.reshape(-1), x_min_raw, x_max_raw)
     # P(X ≤ x) = P(S_T ≤ K·e^x) where X = log(S_T/K)
     s_t_test = K * np.exp(x_raw_test)
-    test_y = (
-        bs_cdf(
-            s_t_test,
-            s_0=BS_S0,
-            risk_free_rate=BS_R,
-            volatility=BS_SIGMA,
-            maturity=BS_T,
-        ).reshape(-1, 1)
-        - 0.5
-    )
+    test_y = bs_cdf(
+        s_t_test,
+        s_0=BS_S0,
+        risk_free_rate=BS_R,
+        volatility=BS_SIGMA,
+        maturity=BS_T,
+    ).reshape(-1, 1)  # in [0, 1]
 
     return train_x, train_y, u_test, test_y, x_min_raw, x_max_raw
 
@@ -154,17 +155,29 @@ def run_single(
 ) -> dict:
     """Train one configuration and return a result dict."""
     cfg = METHOD_CONFIGS[method_id]
+    use_real = cfg.get("use_real_method_I", False)
 
     # Deterministic seed: spread across K, data size, and rep
     seed = rep * 7919 + int(K) * 97 + n_data
 
     # ── 1. Data ───────────────────────────────────────────────────────────────
-    train_x, train_y, test_x, test_y, x_min_raw, x_max_raw = _build_dataset(
-        K=K,
-        n_data=n_data,
-        n_test=cfg["n_test"],
-        seed=seed,
-    )
+    if use_real:
+        # Bifurcation 1: analytical grid + PDF labels (paper Sec. 3.2.1)
+        train_x, pdf_labels, pdf_deriv_labels, x_min_raw, x_max_raw = generate_method_I_data(
+            S0=BS_S0, K=K, r=BS_R, T=BS_T, sigma=BS_SIGMA, n_points=n_data
+        )
+        train_y = pdf_labels.reshape(-1, 1)
+        test_x, test_pdf_labels, _, _, _ = generate_method_I_data(
+            S0=BS_S0, K=K, r=BS_R, T=BS_T, sigma=BS_SIGMA, n_points=cfg["n_test"]
+        )
+        test_y = test_pdf_labels.reshape(-1, 1)
+    else:
+        train_x, train_y, test_x, test_y, x_min_raw, x_max_raw = _build_dataset(
+            K=K,
+            n_data=n_data,
+            n_test=cfg["n_test"],
+            seed=seed,
+        )
 
     # ── 2. Circuit ────────────────────────────────────────────────────────────
     # Seed global numpy RNG for weight initialisation (data seed already used above)
@@ -173,7 +186,7 @@ def run_single(
         features_number=1,
         n_qubits_by_feature=n_qubits,
         n_layers=n_layers,
-        base_frecuency=[0.5],  # maps [-pi, pi] → [-pi/2, pi/2] for RX encoding
+        base_frecuency=[1.0],  # full frequency spectrum as per Schuld et al.
         shift_feature=[0.0],
         torch_device=device,
     )
@@ -191,17 +204,48 @@ def run_single(
     )
 
     # ── 4. Closures for adam_optimizer_loop ───────────────────────────────────
-    def loss_fn(w):
-        return qdml_loss_workflow(w, train_x, train_y, **workflow_cfg)
+    if use_real:
+        # Bifurcation 2: H¹ supervised loss on PDF (paper eq. 12, Sec. 3.2.1)
+        _circuit_fn = workflow_cfg["circuit_fn"]
+        _device = workflow_cfg.get("torch_device", "cpu")
+        _alpha_0 = cfg["alpha_0"]
+        _alpha_1 = cfg["alpha_1"]
 
-    def metric_fn(w):
-        return mse_workflow(w, test_x, test_y, **workflow_cfg)
+        def loss_fn(w):
+            w_t = torch.tensor(
+                list(w.values()) if isinstance(w, dict) else list(w),
+                dtype=torch.float64,
+            )
+            return method_I_h1_loss(
+                w_t, train_x, pdf_labels, pdf_deriv_labels,
+                circuit_fn=_circuit_fn, device=_device,
+                alpha_0=_alpha_0, alpha_1=_alpha_1, create_graph=False,
+            ).item()
 
-    def gradient_fn(w, bx, by):
-        def _loss_torch(w_t, bx_, by_):
-            return qdml_loss_workflow(w_t, bx_, by_, **workflow_cfg)
+        def metric_fn(w):
+            preds = workflow_for_pdf_direct(w, test_x, **workflow_cfg)["y_predict_pdf"]
+            return float(np.mean((preds - test_pdf_labels) ** 2))
 
-        return torch_gradient(list(w), bx, by, _loss_torch)
+        def gradient_fn(w, bx, by):
+            # bx = train_x batch, by = pdf_labels batch; pdf_deriv_labels captured
+            def _loss_torch(w_t, bx_, by_):
+                return method_I_h1_loss(
+                    w_t, bx_, by_, pdf_deriv_labels,
+                    circuit_fn=_circuit_fn, device=_device,
+                    alpha_0=_alpha_0, alpha_1=_alpha_1, create_graph=True,
+                )
+            return torch_gradient(list(w), bx, by, _loss_torch)
+    else:
+        def loss_fn(w):
+            return qdml_loss_workflow(w, train_x, train_y, **workflow_cfg)
+
+        def metric_fn(w):
+            return mse_workflow(w, test_x, test_y, **workflow_cfg)
+
+        def gradient_fn(w, bx, by):
+            def _loss_torch(w_t, bx_, by_):
+                return qdml_loss_workflow(w_t, bx_, by_, **workflow_cfg)
+            return torch_gradient(list(w), bx, by, _loss_torch)
 
     # ── 5. Output folder ──────────────────────────────────────────────────────
     run_name = f"M{method_id}_K{int(K)}_arch{n_qubits}x{n_layers}_data{n_data}_rep{rep:02d}"
@@ -346,11 +390,31 @@ def main():
         help=f"Repetitions per configuration (default: {N_REPS})",
     )
     parser.add_argument(
+        "--architectures",
+        nargs="+",
+        type=str,
+        default=None,
+        help=(
+            "Filter architectures to run, format NxL e.g. '7x7 5x5'. "
+            "If omitted all architectures in the method config are used."
+        ),
+    )
+    parser.add_argument(
         "--dry_run",
         action="store_true",
         help="Print the experiment list without training",
     )
     args = parser.parse_args()
+
+    # Parse --architectures filter into a set of (n_qubits, n_layers) tuples
+    arch_filter: set | None = None
+    if args.architectures is not None:
+        arch_filter = set()
+        for spec in args.architectures:
+            parts = spec.lower().split("x")
+            if len(parts) != 2:
+                raise ValueError(f"Invalid architecture spec '{spec}', expected NxL (e.g. 7x7)")
+            arch_filter.add((int(parts[0]), int(parts[1])))
 
     results_dir = pathlib.Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -361,6 +425,8 @@ def main():
         cfg = METHOD_CONFIGS[method_id]
         for K in args.strikes:
             for n_qubits, n_layers in cfg["architectures"]:
+                if arch_filter is not None and (n_qubits, n_layers) not in arch_filter:
+                    continue
                 for n_data in cfg["datasets"]:
                     for rep in range(args.n_reps):
                         experiments.append(
