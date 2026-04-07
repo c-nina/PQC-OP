@@ -672,18 +672,28 @@ def estimate_price_ibp(
     h_at_a = float(np.maximum(K_ * (1.0 - np.exp(x_raw_a)), 0.0))
     h_at_b = float(np.maximum(K_ * (1.0 - np.exp(x_raw_b)), 0.0))
 
-    if x_max_raw > x_min_raw:
-        u_c = 2.0 * np.pi * (0.0 - x_min_raw) / (x_max_raw - x_min_raw) - np.pi
+    # Locate discontinuity c of h'(x) = d/dx max(K*(1-exp(x)),0) in u-space.
+    # h'(x) = -K*exp(x) for x < 0,  h'(x) = 0 for x > 0.
+    # Three cases depending on whether x=0 falls inside the empirical domain.
+    if x_min_raw >= 0.0:
+        # All log-moneyness >= 0: put is always OTM, payoff=0 everywhere → V=0.
+        return 0.0
+    elif x_max_raw <= 0.0:
+        # All log-moneyness <= 0: put is always ITM, discontinuity is to the right
+        # of the domain. h_prime is non-zero over the entire domain.
+        # Set u_c beyond b so that mask_a covers all grid points.
+        u_c = b + 1.0
     else:
-        u_c = 0.0
-    u_c = float(np.clip(u_c, a + 1e-8, b - 1e-8))
+        # Normal case: x=0 is strictly inside [x_min_raw, x_max_raw].
+        # The mapping u = 2π*(x - x_min)/(x_max - x_min) - π gives u_c ∈ (a, b).
+        u_c = 2.0 * np.pi * (0.0 - x_min_raw) / (x_max_raw - x_min_raw) - np.pi
 
     x_raw_grid = inverse_rescaling_u_to_xt(u_flat, x_min_raw, x_max_raw)
     dx_du = (x_max_raw - x_min_raw) / (2.0 * np.pi)
     h_prime = np.where(u_flat < u_c, -K_ * np.exp(x_raw_grid) * dx_du, 0.0)
 
-    mask_a = u_flat <= u_c
-    mask_b = u_flat > u_c
+    mask_a = u_flat < u_c
+    mask_b = u_flat >= u_c
 
     C_k_a, D_k_a = payoff_derivative_fourier_coefficients(u_flat[mask_a], h_prime[mask_a], k_terms, a_ext, L_ext)
     C_k_b, D_k_b = payoff_derivative_fourier_coefficients(u_flat[mask_b], h_prime[mask_b], k_terms, a_ext, L_ext)

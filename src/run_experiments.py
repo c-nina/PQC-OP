@@ -77,6 +77,7 @@ METHOD_CONFIGS: dict[int, dict] = {
         "n_test": 100,
         "pricing": "pdf_fourier",
         "use_real_method_I": True,  # train on analytical PDF labels (paper Sec. 3.2.1)
+        "base_frecuency": 1.0,  # full frequency spectrum (paper Sec. 2.2, Schuld et al.)
     },
     2: {
         "name": "method_II",
@@ -87,6 +88,7 @@ METHOD_CONFIGS: dict[int, dict] = {
         "alpha_1": 0.8,
         "n_test": 1000,
         "pricing": "ibp",
+        "base_frecuency": 0.5,  # half-frequency for CDF training — smoother IBP (paper Fig. 3, Sec. 3.2)
     },
 }
 
@@ -186,7 +188,7 @@ def run_single(
         features_number=1,
         n_qubits_by_feature=n_qubits,
         n_layers=n_layers,
-        base_frecuency=[1.0],  # full frequency spectrum as per Schuld et al.
+        base_frecuency=[cfg.get("base_frecuency", 1.0)],
         shift_feature=[0.0],
         torch_device=device,
     )
@@ -400,6 +402,16 @@ def main():
         ),
     )
     parser.add_argument(
+        "--datasets",
+        nargs="+",
+        type=int,
+        default=None,
+        help=(
+            "Filter dataset sizes to run, e.g. '2500 5000'. "
+            "If omitted all dataset sizes in the method config are used."
+        ),
+    )
+    parser.add_argument(
         "--dry_run",
         action="store_true",
         help="Print the experiment list without training",
@@ -416,6 +428,8 @@ def main():
                 raise ValueError(f"Invalid architecture spec '{spec}', expected NxL (e.g. 7x7)")
             arch_filter.add((int(parts[0]), int(parts[1])))
 
+    dataset_filter: set | None = None if args.datasets is None else set(args.datasets)
+
     results_dir = pathlib.Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -428,6 +442,8 @@ def main():
                 if arch_filter is not None and (n_qubits, n_layers) not in arch_filter:
                     continue
                 for n_data in cfg["datasets"]:
+                    if dataset_filter is not None and n_data not in dataset_filter:
+                        continue
                     for rep in range(args.n_reps):
                         experiments.append(
                             dict(
