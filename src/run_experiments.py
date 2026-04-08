@@ -77,7 +77,11 @@ METHOD_CONFIGS: dict[int, dict] = {
         "n_test": 100,
         "pricing": "pdf_fourier",
         "use_real_method_I": True,  # train on analytical PDF labels (paper Sec. 3.2.1)
-        "base_frecuency": 1.0,  # full frequency spectrum (paper Sec. 2.2, Schuld et al.)
+        # base_frecuency=0.5 → circuit domain [-2π, 2π], training data in [-π, π].
+        # Paper Sec. 3.2 / Figs 2-3: training in [-2π, 2π] avoids Gibbs oscillations
+        # at the CDF/PDF edges by giving the model freedom outside the data region.
+        "base_frecuency": 0.5,
+        "eval_interval": (-2 * np.pi, 2 * np.pi),  # domain for Fourier extraction at pricing time
     },
     2: {
         "name": "method_II",
@@ -303,6 +307,9 @@ def run_single(
 
     # ── 8. Option pricing ─────────────────────────────────────────────────────
     artifacts = {"workflow_cfg": workflow_cfg}
+    # For Method I: Fourier coefficients are extracted over [-2π, 2π] (circuit domain).
+    # For Method II: stays at [-π, π] with classical extension to [-2π, 2π] inside estimate_price_ibp.
+    pricing_eval_interval = cfg.get("eval_interval", TRAIN_INTERVAL)
     price_kwargs = dict(
         weights=final_weights,
         artifacts=artifacts,
@@ -310,6 +317,7 @@ def run_single(
         x_min_raw=x_min_raw,
         x_max_raw=x_max_raw,
         train_interval=TRAIN_INTERVAL,
+        eval_interval=pricing_eval_interval,
         risk_free_rate=BS_R,
         delta_t=BS_T,
         k_terms=K_TERMS,

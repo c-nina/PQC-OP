@@ -491,6 +491,7 @@ def estimate_price_from_trained_pqc(
     dask_client=None,
     debug: bool = False,
     debug_label: str = "",
+    eval_interval: tuple = None,
 ) -> float:
     """
     Method I — PDF-based Fourier pricing.
@@ -504,9 +505,9 @@ def estimate_price_from_trained_pqc(
     weights        : trained circuit weights (list, dict, or torch.Tensor)
     artifacts      : dict returned by build_mode_artifacts (contains workflow_cfg)
     K_             : strike price
-    x_min_raw      : minimum log-moneyness from training data (for rescaling)
-    x_max_raw      : maximum log-moneyness from training data (for rescaling)
-    train_interval : (a, b) domain used during training, e.g. (-2pi, 2pi)
+    x_min_raw      : minimum log-moneyness boundary (left endpoint of physical domain)
+    x_max_raw      : maximum log-moneyness boundary (right endpoint of physical domain)
+    train_interval : (a, b) domain where training data lived, e.g. (-pi, pi)
     risk_free_rate : annualised risk-free rate
     delta_t        : time to maturity
     k_terms        : number of Fourier harmonics (default 12)
@@ -514,18 +515,25 @@ def estimate_price_from_trained_pqc(
     dask_client    : optional Dask client for distributed evaluation
     debug          : if True, print intermediate diagnostics
     debug_label    : label string for debug messages
+    eval_interval  : (a, b) domain for circuit evaluation and Fourier extraction.
+                     Defaults to train_interval.  For Method I (base_frecuency=0.5)
+                     this should be (-2π, 2π) so the full circuit domain is used
+                     and Gibbs oscillations at the data boundary are suppressed
+                     (paper Sec. 3.2, Figs 2-3).
 
     Returns
     -------
     float : estimated put option price, or np.nan on failure
     """
-    from qml4var.data_utils import inverse_rescaling_u_to_xt
     from qml4var.workflows import workflow_for_pdf_direct
 
     trapz_fn = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
 
     workflow_cfg = artifacts["workflow_cfg"]
-    a, b = train_interval
+
+    # eval_interval is the circuit domain used for Fourier extraction.
+    # For Method I (base_frecuency=0.5): [-2π, 2π]; for Method II: [-π, π].
+    a, b = eval_interval if eval_interval is not None else train_interval
     u_grid = np.linspace(a, b, grid_points).reshape(-1, 1)
 
     pdf_raw = workflow_for_pdf_direct(weights, u_grid, dask_client=dask_client, **workflow_cfg)["y_predict_pdf"].reshape(-1)
@@ -561,7 +569,11 @@ def estimate_price_from_trained_pqc(
     )
     _, A_k_f, B_k_f = ak_bk_from_complex_coefficients(k_vals, c_k, k_max=k_terms)
 
-    x_raw_grid = inverse_rescaling_u_to_xt(u_grid[:, 0], x_min_raw, x_max_raw)
+    # Generalised inverse mapping: u ∈ [a, b] (eval domain) → x ∈ [x_min_raw, x_max_raw].
+    # For Method I: [a,b] = [-2π, 2π], [x_min, x_max] = analytical BS bounds [a_bs, b_bs].
+    # For Method II: [a,b] = [-π, π],  [x_min, x_max] = empirical data range.
+    u_min, u_max = float(a), float(b)
+    x_raw_grid = x_min_raw + (u_grid[:, 0] - u_min) * (x_max_raw - x_min_raw) / (u_max - u_min)
     payoff = np.maximum(K_ * (1.0 - np.exp(x_raw_grid)), 0.0)
 
     L = b - a
