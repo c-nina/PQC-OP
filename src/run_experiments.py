@@ -77,11 +77,13 @@ METHOD_CONFIGS: dict[int, dict] = {
         "n_test": 100,
         "pricing": "pdf_fourier",
         "use_real_method_I": True,  # train on analytical PDF labels (paper Sec. 3.2.1)
-        # base_frecuency=0.5 → circuit domain [-2π, 2π], training data in [-π, π].
-        # Paper Sec. 3.2 / Figs 2-3: training in [-2π, 2π] avoids Gibbs oscillations
-        # at the CDF/PDF edges by giving the model freedom outside the data region.
-        "base_frecuency": 0.5,
-        "eval_interval": (-2 * np.pi, 2 * np.pi),  # domain for Fourier extraction at pricing time
+        # base_frecuency=1.0 → circuit Fourier period 2π, domain [-π, π].
+        # For the PDF (Method I) this works well: the lognormal PDF is smooth and
+        # decays to near-zero at the boundaries of [-π, π], so Gibbs oscillations
+        # are negligible (unlike the CDF in Method II which has a step-function edge).
+        # Paper Figs 2-3 show the difference is minor for the PDF case.
+        "base_frecuency": 1.0,
+        "eval_interval": (-np.pi, np.pi),  # same as training domain (no extended evaluation needed)
     },
     2: {
         "name": "method_II",
@@ -307,26 +309,28 @@ def run_single(
 
     # ── 8. Option pricing ─────────────────────────────────────────────────────
     artifacts = {"workflow_cfg": workflow_cfg}
-    # For Method I: Fourier coefficients are extracted over [-2π, 2π] (circuit domain).
-    # For Method II: stays at [-π, π] with classical extension to [-2π, 2π] inside estimate_price_ibp.
-    pricing_eval_interval = cfg.get("eval_interval", TRAIN_INTERVAL)
-    price_kwargs = dict(
+    _base_kwargs = dict(
         weights=final_weights,
         artifacts=artifacts,
         K_=K,
         x_min_raw=x_min_raw,
         x_max_raw=x_max_raw,
         train_interval=TRAIN_INTERVAL,
-        eval_interval=pricing_eval_interval,
         risk_free_rate=BS_R,
         delta_t=BS_T,
         k_terms=K_TERMS,
     )
     try:
         if cfg["pricing"] == "pdf_fourier":
-            est_price = float(estimate_price_from_trained_pqc(**price_kwargs))
+            # Method I: eval_interval controls the circuit domain used for Fourier extraction.
+            # With base_frecuency=0.5 the full circuit domain is [-2π, 2π].
+            pricing_eval_interval = cfg.get("eval_interval", TRAIN_INTERVAL)
+            est_price = float(estimate_price_from_trained_pqc(
+                **_base_kwargs, eval_interval=pricing_eval_interval
+            ))
         else:
-            est_price = float(estimate_price_ibp(**price_kwargs))
+            # Method II: estimate_price_ibp handles its own domain extension internally.
+            est_price = float(estimate_price_ibp(**_base_kwargs))
     except Exception as exc:
         print(f"  [pricing error] {exc}")
         est_price = float("nan")

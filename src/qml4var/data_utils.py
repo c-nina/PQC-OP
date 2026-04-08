@@ -183,18 +183,16 @@ def generate_method_I_labels(
     """
     Generate analytical PDF labels and their derivatives for Method I (paper Sec. 3.2.1).
 
-    The PQC circuit domain is [-2π, 2π] (base_frecuency=0.5).  The physical
-    domain [a, b] maps linearly onto [-2π, 2π].  Training data lives in [-π, π]
-    (the central half of the circuit domain), so this function is typically called
-    with xs_rescaled ∈ [-π, π] to get labels at the training points.  The returned
-    densities are in the [-2π, 2π] reference frame (i.e. they integrate to 1 over
-    [-2π, 2π], not over [-π, π]).
+    The physical domain [a, b] maps linearly onto [-2π, 2π] via
+        u = 4π * (x - a) / (b - a) - 2π.
+    This function returns the density in the [-2π, 2π] reference frame.
+    Callers that want labels in the [-π, π] training domain should pass
+    xs_rescaled = 2 * grid and apply the Jacobian factor of 2 (see generate_method_I_data).
 
     Parameters
     ----------
     xs_rescaled : np.ndarray, shape (I,) or (I, 1)
-        Evaluation points in the circuit domain.  For training, these are in [-π, π];
-        the function also accepts any subset of [-2π, 2π].
+        Evaluation points in the [-2π, 2π] reference frame.
     mu : float
         Mean of the Normal distribution in log-moneyness space.
         For Black-Scholes: mu = log(S0/K) + (r - σ²/2) * T
@@ -270,17 +268,18 @@ def generate_method_I_data(
     a = mu - 3.0 * sigma_T
     b = mu + 3.0 * sigma_T
 
-    # Uniform grid in [-π, π] (training data region within the circuit domain [-2π, 2π]).
-    # The circuit uses base_frecuency=0.5, so its Fourier period is 4π (domain [-2π, 2π]).
-    # Training data lives in [-π, π] — the central half — giving the model freedom outside
-    # that region to suppress Gibbs oscillations (paper Sec. 3.2, Figs 2-3).
+    # Uniform grid in [-π, π] — the full circuit domain with base_frecuency=1.0.
     grid = np.linspace(-np.pi, np.pi, n_points)
 
-    # generate_method_I_labels expects xs_rescaled ∈ [-2π, 2π] and returns densities in
-    # [-2π, 2π] space.  Passing grid ∈ [-π, π] evaluates the PDF at the training points,
-    # which map to x ∈ [a+(b-a)/4, a+3(b-a)/4] (middle half of [a, b]) — intentionally
-    # leaving the outer quarters of the physical domain unconstrained during training.
-    pdf_vals, pdf_deriv = generate_method_I_labels(grid, mu, sigma_T, a, b)
+    # Labels are PDF and PDF-derivative in [-π, π] space.
+    # Passing 2*grid (∈ [-2π, 2π]) maps to x ∈ [a, b] via generate_method_I_labels'
+    # inverse map (which expects inputs in [-2π, 2π]).  The returned densities are in
+    # [-2π, 2π] space; converting to [-π, π] space requires:
+    #   f_{[-π,π]}(u) = f_{[-2π,2π]}(2u) * 2       (Jacobian: d(2u)/du = 2)
+    #   df_{[-π,π]}/du = df_{[-2π,2π]}/dv * 4       (chain rule: 2² = 4)
+    pdf_vals_2pi, pdf_deriv_2pi = generate_method_I_labels(2.0 * grid, mu, sigma_T, a, b)
+    pdf_vals = pdf_vals_2pi * 2.0
+    pdf_deriv = pdf_deriv_2pi * 4.0
 
     return grid.reshape(-1, 1), pdf_vals, pdf_deriv, a, b
 
