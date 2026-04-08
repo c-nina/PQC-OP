@@ -125,12 +125,21 @@ def _qdml_loss_torch(
         factor = float(np.prod(domain_x.max(axis=0) - domain_x.min(axis=0)) / domain_x.shape[0])
         integral = pdf_sq_tensor.sum() * factor
 
-    # --- Boundary constraint: CDF(x_min) ≈ 0, CDF(x_max) ≈ 1 (paper Sec. 3.2.2) ---
-    x_sorted_idx = x_cdf[:, 0].argsort()
-    x_min = x_cdf[x_sorted_idx[0:1]]   # shape (1, n_features)
-    x_max = x_cdf[x_sorted_idx[-1:]]   # shape (1, n_features)
-    cdf_at_min = (batched_circuit(weights_t, x_min) + 1.0) / 2.0  # (1,)
-    cdf_at_max = (batched_circuit(weights_t, x_max) + 1.0) / 2.0  # (1,)
+    # --- Boundary constraint: CDF(a) ≈ 0, CDF(b) ≈ 1 (paper Sec. 3.2.2) ---
+    # Evaluate at fixed domain endpoints (minval, maxval) instead of empirical data
+    # min/max so the anchoring is always at the true training domain boundaries [-π, π].
+    # This is especially important when shift_feature ≠ 0: the empirical min/max of the
+    # training batch and the intended domain endpoints may diverge slightly, but the IBP
+    # formula always integrates over [-π, π], so we anchor there.
+    n_feat = data_x_arr.shape[1]
+    x_bound_a = torch.tensor(
+        np.asarray(minval).reshape(1, n_feat), dtype=torch.float64, device=torch_device
+    )
+    x_bound_b = torch.tensor(
+        np.asarray(maxval).reshape(1, n_feat), dtype=torch.float64, device=torch_device
+    )
+    cdf_at_min = (batched_circuit(weights_t, x_bound_a) + 1.0) / 2.0  # (1,)
+    cdf_at_max = (batched_circuit(weights_t, x_bound_b) + 1.0) / 2.0  # (1,)
     loss_boundary = cdf_at_min[0] ** 2 + (cdf_at_max[0] - 1.0) ** 2
 
     return alpha_0 * loss_cdf + alpha_1 * (-2.0 * mean_pdf + integral) + loss_boundary

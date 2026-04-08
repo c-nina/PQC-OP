@@ -94,7 +94,14 @@ METHOD_CONFIGS: dict[int, dict] = {
         "alpha_1": 0.8,
         "n_test": 1000,
         "pricing": "ibp",
-        "base_frecuency": 0.5,  # half-frequency for CDF training — smoother IBP (paper Fig. 3, Sec. 3.2)
+        # base_frecuency=0.5: half-frequency for CDF training — smoother IBP (paper Fig. 3, Sec. 3.2).
+        # The encoding becomes RX(0.5*x + π/4), covering [-π/4, 3π/4] instead of [-π/2, π/2].
+        "base_frecuency": 0.5,
+        # shift_feature=π/4 breaks the parity symmetry of the Z⊗...⊗Z observable.
+        # Without this, RX(0.5*x) + Z⊗Z observable gives f(-x) = f(x), so the circuit
+        # cannot represent an asymmetric CDF and loss_boundary becomes self-contradictory
+        # (F(a)=0 and F(b)=1 can't both be satisfied if the output is even).
+        "shift_feature": np.pi / 4.0,
     },
 }
 
@@ -195,7 +202,7 @@ def run_single(
         n_qubits_by_feature=n_qubits,
         n_layers=n_layers,
         base_frecuency=[cfg.get("base_frecuency", 1.0)],
-        shift_feature=[0.0],
+        shift_feature=[cfg.get("shift_feature", 0.0)],
         torch_device=device,
     )
     weights_dict = init_weights(weights_names)
