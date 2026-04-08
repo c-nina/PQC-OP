@@ -660,6 +660,16 @@ def estimate_price_ibp(
     cdf_raw = workflow_for_cdf(weights, u_inner, dask_client=dask_client, **workflow_cfg)["y_predict_cdf"].reshape(-1)
     cdf_inner = np.clip(cdf_raw, 0.0, 1.0)  # workflow_for_cdf already maps to [0,1]
 
+    # Enforce theoretical boundary conditions F(a)=0, F(b)=1.
+    # The IBP formula (paper eq. 8) assumes these exactly: h(a)*F(a) and h(b)*F(b) are
+    # the boundary terms, and h(a) is O(K) for ITM puts.  A PQC prediction F(a)=0.02
+    # introduces an error of ~K*0.02 ≈ 1–2 price units.  The training loss_boundary
+    # term encourages (but does not guarantee) these conditions; anchoring at inference
+    # enforces the theoretical boundary condition the IBP derivation requires.
+    # Also ensures the Fourier extension to [-2π, 2π] is continuous at u=a and u=b.
+    cdf_inner[0] = 0.0
+    cdf_inner[-1] = 1.0
+
     F_at_a = float(cdf_inner[0])
     F_at_b = float(cdf_inner[-1])
 

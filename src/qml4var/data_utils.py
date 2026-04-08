@@ -164,10 +164,18 @@ def simulate_black_scholes_data_rescaled(
     s_t = S0_ * np.exp((r_ - 0.5 * sigma_**2) * T_ + sigma_ * np.sqrt(T_) * z)
     x_t = np.log(s_t / K_)
 
-    x_min_raw = float(np.min(x_t))
-    x_max_raw = float(np.max(x_t))
-    if x_max_raw <= x_min_raw:
-        x_max_raw = x_min_raw + 1.0e-8
+    # Analytical bounds at ±3σ_T (paper Sec. 3.1.1: truncation domain fixed to cover ≥99.7%
+    # of the distribution).  Using analytical bounds instead of empirical min/max gives:
+    #   - consistent domain across repetitions → stable circuit learning
+    #   - fixed strike position u_c in u-space → reproducible pricing
+    #   - guaranteed F(a) ≈ 0.00135 and F(b) ≈ 0.99865 at the boundaries
+    mu = np.log(S0_ / K_) + (r_ - 0.5 * sigma_**2) * T_
+    sigma_T = sigma_ * np.sqrt(T_)
+    x_min_raw = float(mu - 3.0 * sigma_T)
+    x_max_raw = float(mu + 3.0 * sigma_T)
+
+    # Clip the ~0.3% of extreme outliers so all samples map into [-π, π]
+    x_t = np.clip(x_t, x_min_raw, x_max_raw)
 
     u_t = 2.0 * np.pi * (x_t - x_min_raw) / (x_max_raw - x_min_raw) - np.pi
     return x_t.reshape(-1, 1), u_t.reshape(-1, 1), x_min_raw, x_max_raw
@@ -222,12 +230,12 @@ def generate_method_I_labels(
 
     # PDF and its derivative in original space
     pdf_original = norm.pdf(xs_original, loc=mu, scale=sigma)
-    dpdf_original = -((xs_original - mu) / sigma ** 2) * pdf_original
+    dpdf_original = -((xs_original - mu) / sigma**2) * pdf_original
 
     # Change of variables: f_rescaled(u) = f_original(x(u)) * |dx/du| = f_original * scale
     pdf_vals = pdf_original * scale
     # d(f_rescaled)/du = d(f_original)/dx * (dx/du)² = dpdf_original * scale²
-    pdf_deriv = dpdf_original * scale ** 2
+    pdf_deriv = dpdf_original * scale**2
 
     return pdf_vals, pdf_deriv
 
