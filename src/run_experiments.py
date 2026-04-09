@@ -95,13 +95,24 @@ METHOD_CONFIGS: dict[int, dict] = {
         "n_test": 1000,
         "pricing": "ibp",
         # base_frecuency=0.5: half-frequency for CDF training — smoother IBP (paper Fig. 3, Sec. 3.2).
-        # The encoding becomes RX(0.5*x + π/4), covering [-π/4, 3π/4] instead of [-π/2, π/2].
         "base_frecuency": 0.5,
-        # shift_feature=π/4 breaks the parity symmetry of the Z⊗...⊗Z observable.
-        # Without this, RX(0.5*x) + Z⊗Z observable gives f(-x) = f(x), so the circuit
-        # cannot represent an asymmetric CDF and loss_boundary becomes self-contradictory
-        # (F(a)=0 and F(b)=1 can't both be satisfied if the output is even).
-        "shift_feature": np.pi / 4.0,
+        # shift_feature = -π/2 is the critical fix for Method II.
+        #
+        # With shift=0 and Z⊗Z⊗...⊗Z observable the circuit is mathematically even:
+        #   circuit(-x, w) = circuit(x, w)  for all w
+        # (proof: RX(θ)* = RX(-θ), RY/CNOT are real → complex-conjugating the state
+        # maps x→-x, and <Z>* = <Z> so the expectation is unchanged).
+        # This forces CDF(-π) = CDF(π) ≡ 0.5, making loss_boundary gradient = 0
+        # and the circuit stuck in a flat-CDF degenerate minimum → price ≈ 23.
+        #
+        # With shift = -π/2: norm(x) = 0.5x - π/2, so cos(0.5x - π/2) = sin(0.5x).
+        # Single-qubit initialisation:  CDF(-π) = (sin(-π/2)+1)/2 = 0  ✓
+        #                               CDF( π) = (sin( π/2)+1)/2 = 1  ✓
+        # For n qubits with Uniform[0,1] weights (w ≈ 0.5 rad, cos(0.5) ≈ 0.877):
+        #   CDF(-π) ≈ 0.06, CDF(π) ≈ 0.94 → loss_boundary ≈ 0.008  (vs 1.46 for π/4,
+        #   0.5 for shift=0).  Parity is broken (sin is odd), and the optimiser starts
+        #   from a near-valid CDF instead of fighting the boundary from scratch.
+        "shift_feature": -np.pi / 2.0,
     },
 }
 
