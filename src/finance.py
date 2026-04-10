@@ -276,7 +276,7 @@ def ak_bk_from_complex_coefficients(k_values: np.ndarray, c_k: np.ndarray, k_max
             raise ValueError(f"Missing c_k or c_-k for k={k}")
         c_pos, c_neg = coeff_map[k], coeff_map[-k]
         a_k_f[idx] = c_pos + c_neg
-        b_k_f[idx] = -1.0j * (c_pos - c_neg)
+        b_k_f[idx] = 1.0j * (c_pos - c_neg)/
 
     return k_non_negative, a_k_f, b_k_f
 
