@@ -18,10 +18,48 @@
                 "mechatroner.rainbow-csv",
                 "google.colab"
             ],
+            "launch": {
+                "version": "0.2.0",
+                "configurations": [
+                    {
+                        "name": "Python: Current File",
+                        "type": "debugpy",
+                        "request": "launch",
+                        "program": "${file}",
+                        "console": "integratedTerminal",
+                        "justMyCode": true
+                    },
+                    {
+                        "name": "Run Experiments",
+                        "type": "debugpy",
+                        "request": "launch",
+                        "program": "${workspaceFolder}/src/run_experiments.py",
+                        "console": "integratedTerminal",
+                        "justMyCode": true
+                    },
+                    {
+                        "name": "Recompute Prices",
+                        "type": "debugpy",
+                        "request": "launch",
+                        "program": "${workspaceFolder}/src/recompute_prices.py",
+                        "console": "integratedTerminal",
+                        "justMyCode": true
+                    },
+                    {
+                        "name": "Pytest",
+                        "type": "debugpy",
+                        "request": "launch",
+                        "module": "pytest",
+                        "args": ["tests", "-v"],
+                        "console": "integratedTerminal",
+                        "justMyCode": true
+                    }
+                ]
+            },
             "settings": {
                 "python.defaultInterpreterPath": "/usr/local/bin/python",
                 "python.analysis.extraPaths": [
-                    "${workspacesRoot}/src"
+                    "${workspaceFolder}/src"
                 ],
                 "python.testing.pytestEnabled": true,
                 "python.testing.unittestEnabled": false,
