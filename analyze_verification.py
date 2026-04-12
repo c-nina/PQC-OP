@@ -79,7 +79,6 @@ def check_criteria(df: pd.DataFrame) -> bool:
 
     # ── 3. Mean absolute error decreasing with N (ATM K=100) ─────────────────
     methods_present = sorted(df["method"].unique())
-    c3 = True
     for m in methods_present:
         sub = df[(df["method"] == m) & (df["K"] == ATM_K) & np.isfinite(df["abs_error"])]
         if sub.empty:
@@ -91,12 +90,11 @@ def check_criteria(df: pd.DataFrame) -> bool:
         )
         status_local = "PASS" if is_decreasing else "WARN"
         if not is_decreasing:
-            c3 = False   # treat as a warning, not hard failure
+            pass  # treat as a warning, not hard failure
         print(f"[{status_local}] 3. M{m} error decreasing with N (K=100): "
               + " → ".join(f"{v:.3f}" for v in mean_by_n.values))
 
     # ── 4. Mean abs error ATM with N_max < 2.0 ───────────────────────────────
-    c4 = True
     for m in methods_present:
         sub = df[(df["method"] == m) & (df["K"] == ATM_K) & np.isfinite(df["abs_error"])]
         if sub.empty:
@@ -105,7 +103,6 @@ def check_criteria(df: pd.DataFrame) -> bool:
         err_nmax = sub[sub["n_data"] == n_max]["abs_error"].mean()
         ok = err_nmax < ATM_ERR_MAX
         if not ok:
-            c4 = False
             all_pass = False
         status = "PASS" if ok else "FAIL"
         print(f"[{status}] 4. M{m} mean AbsErr at N={n_max}, K=100: {err_nmax:.4f} < {ATM_ERR_MAX}")
@@ -134,7 +131,7 @@ def print_table(df: pd.DataFrame, method_id: int, method_name: str) -> None:
     n_sizes = sorted(sub["n_data"].unique())
 
     # Header
-    header = f"{'N':>6}" + "".join(f"  {'K='+str(int(k)):>12}" for k in strikes)
+    header = f"{'N':>6}" + "".join(f"  {'K=' + str(int(k)):>12}" for k in strikes)
     print("\n" + header)
     print("-" * len(header))
 

@@ -680,12 +680,12 @@ def estimate_price_ibp(
     if x_min_raw >= 0.0:
         # All log-moneyness >= 0: put is always OTM, payoff=0 everywhere → V=0.
         return 0.0
-    if x_max_raw <= 0.0:
-        # All log-moneyness <= 0: put is always ITM, h'≠0 over the entire domain.
-        u_c = b + 1.0
-    else:
-        # Normal case: x=0 is strictly inside [x_min_raw, x_max_raw].
-        u_c = 2.0 * np.pi * (0.0 - x_min_raw) / (x_max_raw - x_min_raw) - np.pi
+    # Normal case: x=0 strictly inside [x_min_raw, x_max_raw]; edge: all ITM → u_c = b+1.
+    u_c = (
+        b + 1.0
+        if x_max_raw <= 0.0
+        else 2.0 * np.pi * (0.0 - x_min_raw) / (x_max_raw - x_min_raw) - np.pi
+    )
 
     x_raw_grid = inverse_rescaling_u_to_xt(u_flat, x_min_raw, x_max_raw)
     dx_du = (x_max_raw - x_min_raw) / (2.0 * np.pi)

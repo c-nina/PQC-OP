@@ -14,19 +14,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import sys
-import os
 
 _SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-import numpy as np
-import pandas as pd
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
-from qml4var.architectures import hardware_efficient_ansatz
-from finance import bs_put_price, estimate_price_from_trained_pqc, estimate_price_ibp
+from finance import bs_put_price, estimate_price_from_trained_pqc, estimate_price_ibp  # noqa: E402
+from qml4var.architectures import hardware_efficient_ansatz  # noqa: E402
 
 # ── Shared constants (must match run_experiments.py) ─────────────────────────
 BS_S0, BS_R, BS_T, BS_SIGMA = 100.0, 0.1, 1.0, 0.25
@@ -176,7 +176,7 @@ def main():
         df = pd.DataFrame(all_results)
         for m in df["method"].unique():
             for k in sorted(df["K"].unique()):
-                sub = df[(df["method"]==m) & (df["K"]==k)]
+                sub = df[(df["method"] == m) & (df["K"] == k)]
                 print(f"  M{int(m)} K={k:.0f}: mean AbsErr = {sub['abs_error'].mean():.4f}")
 
 

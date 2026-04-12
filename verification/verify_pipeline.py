@@ -19,10 +19,9 @@ Results and plots are saved in verification/results/.
 from __future__ import annotations
 
 import argparse
-import os
-import sys
-import pathlib
 import json
+import pathlib
+import sys
 from datetime import datetime
 
 # ── Path setup ────────────────────────────────────────────────────────────────
@@ -33,23 +32,24 @@ for _p in (_SRC, _ROOT, str(_SRC), str(_ROOT)):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import numpy as np
-import torch
-import matplotlib
-matplotlib.use("Agg")  # non-interactive backend for remote GPU
-import matplotlib.pyplot as plt
+import matplotlib as mpl  # noqa: E402
+import numpy as np  # noqa: E402
+import torch  # noqa: E402
 
-from qml4var.architectures import hardware_efficient_ansatz, init_weights
-from qml4var.adam import adam_optimizer_loop, update_parameters_with_adam
-from qml4var.losses import torch_gradient, qdml_loss_workflow
-from qml4var.workflows import workflow_for_cdf, mse_workflow
-from qml4var.data_utils import (
+mpl.use("Agg")  # non-interactive backend for remote GPU
+import matplotlib.pyplot as plt  # noqa: E402
+
+from finance import bs_put_price, estimate_price_from_trained_pqc  # noqa: E402
+from qml4var.adam import adam_optimizer_loop  # noqa: E402
+from qml4var.architectures import hardware_efficient_ansatz, init_weights  # noqa: E402
+from qml4var.data_utils import (  # noqa: E402
     bs_cdf,
     empirical_cdf,
-    simulate_black_scholes_data_rescaled,
     inverse_rescaling_u_to_xt,
+    simulate_black_scholes_data_rescaled,
 )
-from finance import bs_put_price, estimate_price_from_trained_pqc
+from qml4var.losses import qdml_loss_workflow, torch_gradient  # noqa: E402
+from qml4var.workflows import mse_workflow  # noqa: E402
 
 # ── Output directory ──────────────────────────────────────────────────────────
 RESULTS_DIR = _VERIFY_DIR / "results"
@@ -472,7 +472,7 @@ def check_3_price_convergence(device: str = "cpu", n_reps: int = 3) -> bool:
 
     print("\n  Convergence table:")
     print(f"  {'N datos':>8} | {'Precio medio':>13} | {'Error medio':>12} | {'BS exacto':>10}")
-    print(f"  {'-'*8} | {'-'*13} | {'-'*12} | {'-'*10}")
+    print(f"  {'-' * 8} | {'-' * 13} | {'-' * 12} | {'-' * 10}")
     for _, row in summary.iterrows():
         print(
             f"  {int(row['n_data']):>8} | "
@@ -573,7 +573,7 @@ def main():
     checks_to_run = [args.check] if args.check else [1, 2, 3]
 
     print(f"\n{'#' * 60}")
-    print(f"  Pipeline Verification Suite")
+    print("  Pipeline Verification Suite")
     print(f"  Device  : {args.device}")
     print(f"  Checks  : {checks_to_run}")
     print(f"  Results : {RESULTS_DIR.resolve()}")

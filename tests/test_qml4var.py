@@ -13,7 +13,7 @@ import torch
 
 from qml4var.architectures import hardware_efficient_ansatz, init_weights, normalize_data
 from qml4var.data_utils import bs_cdf, empirical_cdf, generate_method_I_data
-from qml4var.losses import mse, torch_gradient, qdml_loss_workflow, unsupervised_qdml_loss_workflow
+from qml4var.losses import mse, qdml_loss_workflow, torch_gradient, unsupervised_qdml_loss_workflow
 from qml4var.workflows import (
     cdf_workflow,
     dft_from_trained_pqc,
@@ -259,16 +259,16 @@ def test_workflow_for_pdf_direct_bounded(small_circuit, workflow_cfg):
 
 def test_method_I_real_price_in_physical_range():
     """Method I real smoke test: estimated price for K=100 must be in [0, K*exp(-rT)]."""
-    import sys
     import os
+    import sys
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
     import torch
+
+    from finance import estimate_price_from_trained_pqc
+    from qml4var.adam import adam_optimizer_loop
     from qml4var.architectures import hardware_efficient_ansatz, init_weights
     from qml4var.data_utils import generate_method_I_data
     from qml4var.losses import method_I_h1_loss, torch_gradient
-    from qml4var.workflows import workflow_for_pdf_direct
-    from qml4var.adam import adam_optimizer_loop
-    from finance import estimate_price_from_trained_pqc
 
     K = 100.0
     r = 0.1
