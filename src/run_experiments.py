@@ -9,7 +9,6 @@ Usage:
   python src/run_experiments.py                        # all, CPU
   python src/run_experiments.py --device cuda          # external GPU
   python src/run_experiments.py --methods 1            # only Method I
-  python src/run_experiments.py --dry_run              # list experiments, no training
   python src/run_experiments.py --n_reps 1             # quick smoke test
 """
 
@@ -440,11 +439,6 @@ def main():
             "If omitted all dataset sizes in the method config are used."
         ),
     )
-    parser.add_argument(
-        "--dry_run",
-        action="store_true",
-        help="Print the experiment list without training",
-    )
     args = parser.parse_args()
 
     # Parse --architectures filter into a set of (n_qubits, n_layers) tuples
@@ -489,16 +483,6 @@ def main():
     print(f"Total experiments : {n_total}")
     print(f"Device            : {args.device}")
     print(f"Results dir       : {results_dir.resolve()}")
-
-    if args.dry_run:
-        for i, e in enumerate(experiments):
-            print(
-                f"  [{i + 1:4d}/{n_total}] "
-                f"M{e['method_id']} K={e['K']} "
-                f"arch={e['n_qubits']}x{e['n_layers']} "
-                f"data={e['n_data']} rep={e['rep']}"
-            )
-        return
 
     master_csv = results_dir / "master_results.csv"
     all_results: list[dict] = []
