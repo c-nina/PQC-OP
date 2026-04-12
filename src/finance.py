@@ -649,10 +649,6 @@ def estimate_price_ibp(
 
     workflow_cfg = artifacts["workflow_cfg"]
     a, b = train_interval
-    L = b - a
-    L_ext = 2.0 * L
-    a_ext = (3.0 * a - b) / 2.0
-    b_ext = a_ext + L_ext
 
     u_inner = np.linspace(a, b, grid_points).reshape(-1, 1)
     u_flat = u_inner[:, 0]
@@ -661,12 +657,6 @@ def estimate_price_ibp(
     cdf_inner = np.clip(cdf_raw, 0.0, 1.0)  # workflow_for_cdf already maps to [0,1]
 
     # Enforce theoretical boundary conditions F(a)=0, F(b)=1.
-    # The IBP formula (paper eq. 8) assumes these exactly: h(a)*F(a) and h(b)*F(b) are
-    # the boundary terms, and h(a) is O(K) for ITM puts.  A PQC prediction F(a)=0.02
-    # introduces an error of ~K*0.02 ≈ 1–2 price units.  The training loss_boundary
-    # term encourages (but does not guarantee) these conditions; anchoring at inference
-    # enforces the theoretical boundary condition the IBP derivation requires.
-    # Also ensures the Fourier extension to [-2π, 2π] is continuous at u=a and u=b.
     cdf_inner[0] = 0.0
     cdf_inner[-1] = 1.0
 
@@ -679,16 +669,6 @@ def estimate_price_ibp(
             f" cdf_min={cdf_inner.min():.4f} cdf_max={cdf_inner.max():.4f}"
         )
 
-    u_ext = np.linspace(a_ext, b_ext, grid_points)
-    cdf_ext = np.where(
-        u_ext < a,
-        0.0,
-        np.where(u_ext > b, 1.0, np.interp(u_ext, u_flat, cdf_inner)),
-    )
-
-    k_vals, c_k = complex_fourier_coefficients(u_ext, cdf_ext, k_terms, interval=(a_ext, b_ext))
-    _, A_k_F, B_k_F = ak_bk_from_complex_coefficients(k_vals, c_k, k_max=k_terms)
-
     x_raw_a = inverse_rescaling_u_to_xt(a, x_min_raw, x_max_raw)
     x_raw_b = inverse_rescaling_u_to_xt(b, x_min_raw, x_max_raw)
     h_at_a = float(np.maximum(K_ * (1.0 - np.exp(x_raw_a)), 0.0))
@@ -700,39 +680,34 @@ def estimate_price_ibp(
     if x_min_raw >= 0.0:
         # All log-moneyness >= 0: put is always OTM, payoff=0 everywhere → V=0.
         return 0.0
-    elif x_max_raw <= 0.0:
-        # All log-moneyness <= 0: put is always ITM, discontinuity is to the right
-        # of the domain. h_prime is non-zero over the entire domain.
-        # Set u_c beyond b so that mask_a covers all grid points.
+    if x_max_raw <= 0.0:
+        # All log-moneyness <= 0: put is always ITM, h'≠0 over the entire domain.
         u_c = b + 1.0
     else:
         # Normal case: x=0 is strictly inside [x_min_raw, x_max_raw].
-        # The mapping u = 2π*(x - x_min)/(x_max - x_min) - π gives u_c ∈ (a, b).
         u_c = 2.0 * np.pi * (0.0 - x_min_raw) / (x_max_raw - x_min_raw) - np.pi
 
     x_raw_grid = inverse_rescaling_u_to_xt(u_flat, x_min_raw, x_max_raw)
     dx_du = (x_max_raw - x_min_raw) / (2.0 * np.pi)
     h_prime = np.where(u_flat < u_c, -K_ * np.exp(x_raw_grid) * dx_du, 0.0)
 
-    mask_a = u_flat < u_c
-    mask_b = u_flat >= u_c
-
-    C_k_a, D_k_a = payoff_derivative_fourier_coefficients(u_flat[mask_a], h_prime[mask_a], k_terms, a_ext, L_ext)
-    C_k_b, D_k_b = payoff_derivative_fourier_coefficients(u_flat[mask_b], h_prime[mask_b], k_terms, a_ext, L_ext)
-
-    return fourier_price_v_t0_ibp(
-        a=a,
-        b=b,
-        risk_free_rate=risk_free_rate,
-        delta_t=delta_t,
-        a_k_F=A_k_F,
-        b_k_F=B_k_F,
-        c_k_a=C_k_a,
-        d_k_a=D_k_a,
-        c_k_b=C_k_b,
-        d_k_b=D_k_b,
-        h_at_a=h_at_a,
-        F_at_a=F_at_a,
-        h_at_b=h_at_b,
-        F_at_b=F_at_b,
-    )
+    # IBP: V = e^{-rT} * [h(b)·F(b) - h(a)·F(a) - ∫_a^b h'(u)·F(u) du]
+    #
+    # Previous implementation used the Parseval sum with k_terms=12 Fourier harmonics
+    # to evaluate the integral.  This caused a systematic upward bias that grew with
+    # architecture size:
+    #   - The circuit with base_frecuency=0.5 can represent frequencies up to
+    #     n_layers × n_qubits × 0.5 (≈8 for 4×4, ≈12.5 for 5×5, ≈18 for 6×6).
+    #   - Larger circuits encode real CDF energy into harmonics above k=12.
+    #   - The k_terms=12 truncation missed these terms, making the Parseval sum
+    #     smaller than the true integral and inflating the price.
+    #
+    # Fix: direct trapezoidal integration on the 1024-point grid, splitting naturally
+    # at u_c via h_prime=0 for u≥u_c.  The integrand h'(u)·F(u) is smooth on each
+    # piece ([a, u_c] and [u_c, b]), so the trapezoidal rule gives O(h²) accuracy
+    # with h=2π/1024, far better than k=12 Parseval and fully architecture-independent.
+    trapz_fn = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+    integral_hprime_F = trapz_fn(h_prime * cdf_inner, u_flat)
+    boundary = h_at_b * F_at_b - h_at_a * F_at_a
+    discount = np.exp(-float(risk_free_rate) * float(delta_t))
+    return float(discount * (boundary - integral_hprime_F))
