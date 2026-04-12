@@ -221,3 +221,6 @@ __marimo__/
 results/*/*/*/config.json
 *.npy
 *.pdf
+verification/*
+analyze_verification.py
+.DS_Store
