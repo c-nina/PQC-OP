@@ -9,34 +9,40 @@
     },
     "postCreateCommand": "bash ./.devcontainer/postCreateCommand.sh",
     "customizations": {
-    "vscode": {
-        "extensions": [
-            "ms-python.python",
-            "ms-toolsai.jupyter",
-            "openai.chatgpt",
-            "charliermarsh.ruff",
-            "mechatroner.rainbow-csv",
-            "google.colab"
-        ],
-        "settings": {
-            "python.defaultInterpreterPath": "/usr/local/bin/python",
-            "python.analysis.extraPaths": [
-                "${workspacesRoot}/src"
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-toolsai.jupyter",
+                "openai.chatgpt",
+                "charliermarsh.ruff",
+                "mechatroner.rainbow-csv",
+                "google.colab"
             ],
-            "python.testing.pytestEnabled": true,
-            "python.testing.unittestEnabled": false,
-            "python.testing.pytestArgs": [
-                "tests"
-            ],
-            "[python]": {
-                "editor.formatOnSave": true,
-                "editor.defaultFormatter": "charliermarsh.ruff",
-                "editor.codeActionsOnSave": {
-                    "source.fixAll.ruff": "always",
-                    "source.organizeImports.ruff": "always"
+            "settings": {
+                "python.defaultInterpreterPath": "/usr/local/bin/python",
+                "python.analysis.extraPaths": [
+                    "${workspacesRoot}/src"
+                ],
+                "python.testing.pytestEnabled": true,
+                "python.testing.unittestEnabled": false,
+                "python.testing.pytestArgs": [
+                    "tests"
+                ],
+                "[python]": {
+                    "editor.formatOnSave": true,
+                    "editor.defaultFormatter": "charliermarsh.ruff",
+                    "editor.codeActionsOnSave": {
+                        "source.fixAll.ruff": "always",
+                        "source.organizeImports.ruff": "always"
+                    }
+                },
+                "files.exclude": {
+                    "/pycache": true
+                },
+                "search.exclude": {
+                    "/pycache": true
                 }
             }
         }
     }
-}
 }
