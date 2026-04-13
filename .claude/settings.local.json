@@ -65,7 +65,10 @@
       "Bash(kill 83958)",
       "Bash(find /workspaces/CodeTFM/results/verification/method_II -name \"result.csv\" -exec ls -lt {} +)",
       "Bash(find /workspaces/CodeTFM/results/verification/method_I -name \"result.csv\" -exec ls -lt {} +)",
-      "Bash(ruff format:*)"
+      "Bash(ruff format:*)",
+      "Bash(jupyter nbconvert:*)",
+      "Bash(rm /workspaces/CodeTFM/src/continue_training.py /workspaces/CodeTFM/src/data_sets.py)",
+      "Bash(rm -rf /workspaces/CodeTFM/src/config)"
     ]
   }
 }

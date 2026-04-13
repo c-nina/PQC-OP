@@ -102,12 +102,10 @@ def pdf_derivative_workflow_cris(weights: Union[list, dict, torch.Tensor], x_sam
 
 
 def workflow_execution_cris(
-    weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, workflow: Callable, dask_client: Optional[Any] = None
+    weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, workflow: Callable
 ):
     """Execute one workflow for all input samples."""
-    if dask_client is None:
-        return [workflow(weights, x_) for x_ in data_x]
-    return dask_client.map(workflow, *([weights] * data_x.shape[0], data_x))
+    return [workflow(weights, x_) for x_ in data_x]
 
 
 def workflow_for_pdf_and_derivative_cris(
@@ -115,7 +113,6 @@ def workflow_for_pdf_and_derivative_cris(
     data_x: np.ndarray,
     labels_pdf: Optional[np.ndarray] = None,
     labels_pdf_derivative: Optional[np.ndarray] = None,
-    dask_client: Optional[Any] = None,
     **kwargs: Any,
 ):
     """
@@ -126,7 +123,6 @@ def workflow_for_pdf_and_derivative_cris(
     weights : list/dict/tensor
     data_x : np.array
     labels_pdf, labels_pdf_derivative : np.array or None
-    dask_client : optional
     kwargs : must contain circuit_fn; optional torch_device.
 
     Returns
@@ -140,15 +136,8 @@ def workflow_for_pdf_and_derivative_cris(
     def pdf_deriv_fn(w, x):
         return pdf_derivative_workflow_cris(w, x, **kwargs)
 
-    predict_pdf = workflow_execution_cris(weights, data_x, pdf_fn, dask_client=dask_client)
-    predict_pdf_derivative = workflow_execution_cris(weights, data_x, pdf_deriv_fn, dask_client=dask_client)
-
-    if dask_client is None:
-        predict_pdf = np.asarray(predict_pdf).reshape(-1, 1)
-        predict_pdf_derivative = np.asarray(predict_pdf_derivative).reshape(-1, 1)
-    else:
-        predict_pdf = np.asarray(dask_client.gather(predict_pdf)).reshape(-1, 1)
-        predict_pdf_derivative = np.asarray(dask_client.gather(predict_pdf_derivative)).reshape(-1, 1)
+    predict_pdf = np.asarray(workflow_execution_cris(weights, data_x, pdf_fn)).reshape(-1, 1)
+    predict_pdf_derivative = np.asarray(workflow_execution_cris(weights, data_x, pdf_deriv_fn)).reshape(-1, 1)
 
     output = {
         "predict_pdf": predict_pdf,
@@ -488,7 +477,6 @@ def estimate_price_from_trained_pqc(
     delta_t: float,
     k_terms: int = 12,
     grid_points: int = 1024,
-    dask_client=None,
     debug: bool = False,
     debug_label: str = "",
     eval_interval: tuple = None,
@@ -512,7 +500,6 @@ def estimate_price_from_trained_pqc(
     delta_t        : time to maturity
     k_terms        : number of Fourier harmonics (default 12)
     grid_points    : number of evaluation points on the grid (default 1024)
-    dask_client    : optional Dask client for distributed evaluation
     debug          : if True, print intermediate diagnostics
     debug_label    : label string for debug messages
     eval_interval  : (a, b) domain for circuit evaluation and Fourier extraction.
@@ -536,7 +523,7 @@ def estimate_price_from_trained_pqc(
     a, b = eval_interval if eval_interval is not None else train_interval
     u_grid = np.linspace(a, b, grid_points).reshape(-1, 1)
 
-    pdf_raw = workflow_for_pdf_direct(weights, u_grid, dask_client=dask_client, **workflow_cfg)["y_predict_pdf"].reshape(-1)
+    pdf_raw = workflow_for_pdf_direct(weights, u_grid, **workflow_cfg)["y_predict_pdf"].reshape(-1)
     pdf_pred = np.nan_to_num(pdf_raw, nan=0.0, posinf=0.0, neginf=0.0)
     pdf_pred = np.clip(pdf_pred, 0.0, None)
 
@@ -609,7 +596,6 @@ def estimate_price_ibp(
     delta_t: float,
     k_terms: int = 12,
     grid_points: int = 1024,
-    dask_client=None,
     debug: bool = False,
     debug_label: str = "",
 ) -> float:
@@ -636,7 +622,6 @@ def estimate_price_ibp(
     delta_t        : time to maturity
     k_terms        : number of Fourier harmonics (default 12)
     grid_points    : number of evaluation points on the grid (default 1024)
-    dask_client    : optional Dask client for distributed evaluation
     debug          : if True, print intermediate diagnostics
     debug_label    : label string for debug messages
 
@@ -653,7 +638,7 @@ def estimate_price_ibp(
     u_inner = np.linspace(a, b, grid_points).reshape(-1, 1)
     u_flat = u_inner[:, 0]
 
-    cdf_raw = workflow_for_cdf(weights, u_inner, dask_client=dask_client, **workflow_cfg)["y_predict_cdf"].reshape(-1)
+    cdf_raw = workflow_for_cdf(weights, u_inner, **workflow_cfg)["y_predict_cdf"].reshape(-1)
     cdf_inner = np.clip(cdf_raw, 0.0, 1.0)  # workflow_for_cdf already maps to [0,1]
 
     # Enforce theoretical boundary conditions F(a)=0, F(b)=1.

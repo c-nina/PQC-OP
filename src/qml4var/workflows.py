@@ -9,7 +9,7 @@ All public functions preserve their original signatures so that existing
 notebook code requires minimal changes (only the workflow_cfg dict changes).
 """
 
-from typing import Any, Callable, Optional, Union
+from typing import Any, Union
 
 import numpy as np
 import torch
@@ -100,30 +100,8 @@ def pdf_workflow(weights: Union[list, dict, torch.Tensor], x_sample: np.ndarray,
 # ---------------------------------------------------------------------------
 
 
-def workflow_execution(
-    weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, workflow: Callable, dask_client: Optional[Any] = None
-):
-    """
-    Execute a workflow function for every sample in data_x.
-
-    Parameters
-    ----------
-    weights : list/dict/tensor
-    data_x : np.array, shape (N, n_features)
-    workflow : callable, workflow(weights, x_sample) -> float
-    dask_client : optional
-
-    Returns
-    -------
-    list or list of dask futures
-    """
-    if dask_client is None:
-        return [workflow(weights, x_) for x_ in data_x]
-    return dask_client.map(workflow, *([weights] * data_x.shape[0], data_x))
-
-
 def workflow_for_cdf(
-    weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, dask_client: Optional[Any] = None, **kwargs: Any
+    weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, **kwargs: Any
 ):
     """
     Compute CDF predictions for a dataset (batched via qml.vmap).
@@ -132,12 +110,6 @@ def workflow_for_cdf(
     -------
     dict with key 'y_predict_cdf' : np.array shape (N,)
     """
-    if dask_client is not None:
-        def cdf_fn(w, x):
-            return cdf_workflow(w, x, **kwargs)
-        preds = dask_client.gather(workflow_execution(weights, data_x, cdf_fn, dask_client=dask_client))
-        return {"y_predict_cdf": np.array(preds)}
-
     circuit_fn = kwargs["circuit_fn"]
     device = kwargs.get("torch_device", "cpu")
     w_t = _weights_to_tensor(weights, device)
@@ -152,7 +124,7 @@ def workflow_for_cdf(
 
 
 def workflow_for_pdf(
-    weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, dask_client: Optional[Any] = None, **kwargs: Any
+    weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, **kwargs: Any
 ):
     """
     Compute PDF predictions for a dataset (batched via qml.vmap).
@@ -161,12 +133,6 @@ def workflow_for_pdf(
     -------
     dict with key 'y_predict_pdf' : np.array shape (N,)
     """
-    if dask_client is not None:
-        def pdf_fn(w, x):
-            return pdf_workflow(w, x, **kwargs)
-        preds = dask_client.gather(workflow_execution(weights, data_x, pdf_fn, dask_client=dask_client))
-        return {"y_predict_pdf": np.array(preds)}
-
     circuit_fn = kwargs["circuit_fn"]
     device = kwargs.get("torch_device", "cpu")
     w_t = _weights_to_tensor(weights, device)
@@ -183,7 +149,7 @@ def workflow_for_pdf(
 
 
 def workflow_for_pdf_direct(
-    weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, dask_client: Optional[Any] = None, **kwargs: Any
+    weights: Union[list, dict, torch.Tensor], data_x: np.ndarray, **kwargs: Any
 ):
     """
     Return the raw circuit output as the PDF prediction (Method I real, paper Sec. 3.2.1).
@@ -214,11 +180,10 @@ def mse_workflow(
     weights: Union[list, dict, torch.Tensor],
     data_x: np.ndarray,
     data_y: np.ndarray,
-    dask_client: Optional[Any] = None,
     **kwargs: Any,
 ):
     """MSE of CDF predictions (numpy, for metric evaluation)."""
-    out = workflow_for_cdf(weights, data_x, dask_client=dask_client, **kwargs)
+    out = workflow_for_cdf(weights, data_x, **kwargs)
     return mse(data_y, out["y_predict_cdf"])
 
 
@@ -228,7 +193,6 @@ def dft_from_trained_pqc(
     maxval: float = 2.0 * np.pi,
     points: int = 256,
     prediction: str = "cdf",
-    dask_client: Optional[Any] = None,
     **kwargs: Any,
 ):
     """
@@ -263,9 +227,9 @@ def dft_from_trained_pqc(
     data_x = x_domain.reshape(-1, 1)
 
     if prediction == "cdf":
-        y_predict = workflow_for_cdf(weights, data_x, dask_client=dask_client, **kwargs)["y_predict_cdf"]
+        y_predict = workflow_for_cdf(weights, data_x, **kwargs)["y_predict_cdf"]
     elif prediction == "pdf":
-        y_predict = workflow_for_pdf(weights, data_x, dask_client=dask_client, **kwargs)["y_predict_pdf"]
+        y_predict = workflow_for_pdf(weights, data_x, **kwargs)["y_predict_pdf"]
     else:
         raise ValueError("prediction must be 'cdf' or 'pdf'")
 

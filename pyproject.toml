@@ -17,13 +17,6 @@ dependencies = [
     "matplotlib>=3.7",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest",
-    "ruff",
-    "ipykernel",
-]
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/qml4var"]
 
@@ -101,4 +94,5 @@ line-ending = "auto"
 dev = [
     "pytest>=9.0.2",
     "ruff>=0.15.7",
+    "ipykernel",
 ]

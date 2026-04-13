@@ -149,7 +149,6 @@ def qdml_loss_workflow(
     weights: Union[list, dict, torch.Tensor],
     data_x: np.ndarray,
     data_y: np.ndarray,
-    dask_client: Optional[Any] = None,
     **kwargs: Any,
 ):
     """
@@ -164,7 +163,6 @@ def qdml_loss_workflow(
     weights : list, dict, or torch.Tensor
     data_x : np.array
     data_y : np.array
-    dask_client : ignored (kept for API compatibility)
     kwargs : must contain circuit_fn, torch_device, loss_weights,
              minval, maxval, points.
     """
@@ -194,7 +192,6 @@ def qdml_loss_workflow(
 def unsupervised_qdml_loss_workflow(
     weights: Union[list, dict, torch.Tensor],
     data_x: np.ndarray,
-    dask_client: Optional[Any] = None,
     **kwargs: Any,
 ):
     """
@@ -211,7 +208,7 @@ def unsupervised_qdml_loss_workflow(
     if data_x.ndim == 1:
         data_x = data_x.reshape(-1, 1)
     data_y = empirical_cdf(data_x).reshape(-1, 1)  # [0,1], no shift
-    return qdml_loss_workflow(weights, data_x, data_y, dask_client=dask_client, **kwargs)
+    return qdml_loss_workflow(weights, data_x, data_y, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -310,39 +307,3 @@ def torch_gradient(weights: list, data_x: np.ndarray, data_y: np.ndarray, loss_f
     loss = loss_fn(weights_t, data_x, data_y)
     loss.backward()
     return weights_t.grad.tolist()
-
-
-# ---------------------------------------------------------------------------
-# Legacy numeric gradient (kept for reference / SPSA notebooks)
-# ---------------------------------------------------------------------------
-
-
-def numeric_gradient(weights: list, data_x: np.ndarray, data_y: np.ndarray, loss: Callable):
-    """
-    Finite-difference gradient (legacy). Prefer torch_gradient for speed.
-
-    Parameters
-    ----------
-    weights : list of float
-    data_x : np.array
-    data_y : np.array
-    loss : callable
-        loss(weights, data_x, data_y) -> float
-
-    Returns
-    -------
-    list of float
-    """
-    import copy
-
-    gradient_i = []
-    epsilon = 1.0e-7
-    for i, weight in enumerate(weights):
-        new_weights = copy.deepcopy(weights)
-        new_weights[i] = weight + epsilon
-        loss_plus = loss(new_weights, data_x, data_y)
-        new_weights = copy.deepcopy(weights)
-        new_weights[i] = weight - epsilon
-        loss_minus = loss(new_weights, data_x, data_y)
-        gradient_i.append((loss_plus - loss_minus) / (2.0 * epsilon))
-    return gradient_i

@@ -223,3 +223,4 @@ results/*/*/*/config.json
 *.pdf
 .DS_Store
 verification/results/*
+.vscode/*
