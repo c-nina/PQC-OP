@@ -247,26 +247,28 @@ def generate_method_I_data(
     T: float,
     sigma: float,
     n_points: int,
+    seed: int | None = None,
 ) -> tuple:
     """
-    Generate Method I real dataset with analytical bounds and PDF labels (paper Sec. 3.2.1).
-
-    Unlike `simulate_black_scholes_data_rescaled`, this uses analytical bounds
-    (mu ± 3*sigma_T) so they are fixed and reproducible regardless of seed.
-    The training grid is a uniform grid in [-π, π] (not random samples).
+    Generate Method I dataset with analytical bounds and PDF labels (paper Sec. 3.2.1).
 
     Parameters
     ----------
     S0, K, r, T, sigma : Black-Scholes parameters
-    n_points            : number of grid points
+    n_points            : number of points
+    seed                : if provided, draws stochastic samples from the lognormal
+                          distribution — matching the paper's labeled dataset
+                          T = {(xi, yi) ∈ X × Y ~ P(x, y)}.
+                          If None, falls back to a uniform grid, which is suitable
+                          for the test set (consistent across calls).
 
     Returns
     -------
-    grid          : np.ndarray, shape (n_points, 1), uniform grid in [-π, π]
-    pdf_vals      : np.ndarray, shape (n_points,), PDF in rescaled space
-    pdf_deriv     : np.ndarray, shape (n_points,), d(PDF)/du in rescaled space
-    a             : float, left bound in log-moneyness space
-    b             : float, right bound in log-moneyness space
+    grid      : np.ndarray, shape (n_points, 1), points in [-π, π]
+    pdf_vals  : np.ndarray, shape (n_points,), PDF in rescaled [-π, π] space
+    pdf_deriv : np.ndarray, shape (n_points,), d(PDF)/du in rescaled space
+    a         : float, left bound in log-moneyness space
+    b         : float, right bound in log-moneyness space
     """
     # Analytical BS parameters for log(S_T/K) ~ N(mu, sigma_T^2)
     mu = np.log(S0 / K) + (r - 0.5 * sigma**2) * T
@@ -276,8 +278,19 @@ def generate_method_I_data(
     a = mu - 3.0 * sigma_T
     b = mu + 3.0 * sigma_T
 
-    # Uniform grid in [-π, π] — the full circuit domain with base_frecuency=1.0.
-    grid = np.linspace(-np.pi, np.pi, n_points)
+    if seed is not None:
+        # Stochastic samples drawn from the lognormal distribution, rescaled to
+        # [-π, π] — paper: T = {(xi, yi) ~ P(x, y)}.  Sorted for reproducibility
+        # and to match the sorted order expected by downstream plotting utilities.
+        _, u_t, _, _ = simulate_black_scholes_data_rescaled(
+            S0_=S0, r_=r, T_=T, sigma_=sigma, K_=K,
+            n_points=n_points, seed=seed,
+        )
+        grid = np.sort(u_t.reshape(-1))
+    else:
+        # Fixed uniform grid — used for the test set so evaluation is deterministic
+        # and comparable across repetitions and configurations.
+        grid = np.linspace(-np.pi, np.pi, n_points)
 
     # Labels are PDF and PDF-derivative in [-π, π] space.
     # Passing 2*grid (∈ [-2π, 2π]) maps to x ∈ [a, b] via generate_method_I_labels'

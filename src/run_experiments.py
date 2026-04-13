@@ -75,13 +75,12 @@ METHOD_CONFIGS: dict[int, dict] = {
         "n_test": 100,
         "pricing": "pdf_fourier",
         "use_real_method_I": True,  # train on analytical PDF labels (paper Sec. 3.2.1)
-        # base_frecuency=1.0 → circuit Fourier period 2π, domain [-π, π].
-        # For the PDF (Method I) this works well: the lognormal PDF is smooth and
-        # decays to near-zero at the boundaries of [-π, π], so Gibbs oscillations
-        # are negligible (unlike the CDF in Method II which has a step-function edge).
-        # Paper Figs 2-3 show the difference is minor for the PDF case.
-        "base_frecuency": 1.0,
-        "eval_interval": (-np.pi, np.pi),  # same as training domain (no extended evaluation needed)
+        # base_frecuency=0.5 → circuit Fourier period 4π, natural domain [-2π, 2π].
+        # Training data is in [-π, π] (center half of the circuit's range), matching
+        # the paper: "the model is trained in [−2π, 2π] with data rescaled to [−π, π]"
+        # (paper Sec. 3.2). This is identical to Method II's encoding choice.
+        "base_frecuency": 0.5,
+        "eval_interval": (-np.pi, np.pi),  # paper Sec. 3.2.1: DFT extracted in [-π, π]
     },
     2: {
         "name": "method_II",
@@ -176,6 +175,7 @@ def run_single(
     rep: int,
     device: str,
     results_dir: pathlib.Path,
+    no_save: bool = False,
 ) -> dict:
     """Train one configuration and return a result dict."""
     cfg = METHOD_CONFIGS[method_id]
@@ -188,7 +188,7 @@ def run_single(
     if use_real:
         # Bifurcation 1: analytical grid + PDF labels (paper Sec. 3.2.1)
         train_x, pdf_labels, pdf_deriv_labels, x_min_raw, x_max_raw = generate_method_I_data(
-            S0=BS_S0, K=K, r=BS_R, T=BS_T, sigma=BS_SIGMA, n_points=n_data
+            S0=BS_S0, K=K, r=BS_R, T=BS_T, sigma=BS_SIGMA, n_points=n_data, seed=seed
         )
         train_y = pdf_labels.reshape(-1, 1)
         test_x, test_pdf_labels, _, _, _ = generate_method_I_data(
@@ -274,31 +274,31 @@ def run_single(
     # ── 5. Output folder ──────────────────────────────────────────────────────
     run_name = f"M{method_id}_K{int(K)}_arch{n_qubits}x{n_layers}_data{n_data}_rep{rep:02d}"
     run_folder = results_dir / cfg["name"] / run_name
-    run_folder.mkdir(parents=True, exist_ok=True)
-
-    (run_folder / "config.json").write_text(
-        json.dumps(
-            dict(
-                method=method_id,
-                K=K,
-                n_qubits=n_qubits,
-                n_layers=n_layers,
-                n_data=n_data,
-                rep=rep,
-                seed=seed,
-                lr=cfg["lr"],
-                alpha_0=cfg["alpha_0"],
-                alpha_1=cfg["alpha_1"],
-                epochs=EPOCHS,
-                device=device,
-                S0=BS_S0,
-                r=BS_R,
-                T=BS_T,
-                sigma=BS_SIGMA,
-            ),
-            indent=2,
+    if not no_save:
+        run_folder.mkdir(parents=True, exist_ok=True)
+        (run_folder / "config.json").write_text(
+            json.dumps(
+                dict(
+                    method=method_id,
+                    K=K,
+                    n_qubits=n_qubits,
+                    n_layers=n_layers,
+                    n_data=n_data,
+                    rep=rep,
+                    seed=seed,
+                    lr=cfg["lr"],
+                    alpha_0=cfg["alpha_0"],
+                    alpha_1=cfg["alpha_1"],
+                    epochs=EPOCHS,
+                    device=device,
+                    S0=BS_S0,
+                    r=BS_R,
+                    T=BS_T,
+                    sigma=BS_SIGMA,
+                ),
+                indent=2,
+            )
         )
-    )
 
     # ── 6. Train ──────────────────────────────────────────────────────────────
     final_weights = adam_optimizer_loop(
@@ -314,14 +314,15 @@ def run_single(
         tolerance=-1e30,  # never trigger early stopping
         n_counts_tolerance=EPOCHS + 1,
         print_step=PRINT_STEP,
-        file_to_save=str(run_folder / "evolution.csv"),
+        file_to_save=None if no_save else str(run_folder / "evolution.csv"),
         progress_bar=True,
         progress_desc=run_name,
         progress_leave=False,
     )
 
     # ── 7. Save final weights ─────────────────────────────────────────────────
-    np.save(run_folder / "final_weights.npy", np.array(final_weights))
+    if not no_save:
+        np.save(run_folder / "final_weights.npy", np.array(final_weights))
 
     # ── 8. Option pricing ─────────────────────────────────────────────────────
     artifacts = {"workflow_cfg": workflow_cfg}
@@ -370,7 +371,8 @@ def run_single(
         rel_error=rel_err,
         final_mse=final_mse,
     )
-    pd.DataFrame([result]).to_csv(run_folder / "result.csv", sep=";", index=False)
+    if not no_save:
+        pd.DataFrame([result]).to_csv(run_folder / "result.csv", sep=";", index=False)
 
     print(
         f"  → BS={bs_price:.4f}  Est={est_price:.4f}  AbsErr={abs_err:.4f}  MSE={final_mse:.2e}",
@@ -439,6 +441,11 @@ def main():
             "If omitted all dataset sizes in the method config are used."
         ),
     )
+    parser.add_argument(
+        "--no_save",
+        action="store_true",
+        help="Skip all file output (CSVs, weights, plots). Useful for smoke tests.",
+    )
     args = parser.parse_args()
 
     # Parse --architectures filter into a set of (n_qubits, n_layers) tuples
@@ -454,7 +461,8 @@ def main():
     dataset_filter: set | None = None if args.datasets is None else set(args.datasets)
 
     results_dir = pathlib.Path(args.results_dir)
-    results_dir.mkdir(parents=True, exist_ok=True)
+    if not args.no_save:
+        results_dir.mkdir(parents=True, exist_ok=True)
 
     # Build experiment grid
     experiments: list[dict] = []
@@ -497,7 +505,7 @@ def main():
             flush=True,
         )
         try:
-            result = run_single(**exp, device=args.device, results_dir=results_dir)
+            result = run_single(**exp, device=args.device, results_dir=results_dir, no_save=args.no_save)
         except Exception as exc:
             print(f"  ERROR: {exc}", flush=True)
             traceback.print_exc()
@@ -505,7 +513,8 @@ def main():
 
         all_results.append(result)
         # Incremental save after every run
-        pd.DataFrame(all_results).to_csv(master_csv, sep=";", index=False)
+        if not args.no_save:
+            pd.DataFrame(all_results).to_csv(master_csv, sep=";", index=False)
 
     elapsed = (datetime.now() - t_start).total_seconds()
     print(f"\n{'=' * 60}")
